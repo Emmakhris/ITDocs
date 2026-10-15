@@ -10,13 +10,21 @@ export function escapeFilter(v: string) {
   return v.replace(/[\\*()\0]/g, (c) => "\\" + c.charCodeAt(0).toString(16).padStart(2, "0"));
 }
 
-function client() {
-  return new Client({
-    url: env("LDAP_URL"),
-    timeout: 8000,
-    connectTimeout: 5000,
-    tlsOptions: { rejectUnauthorized: env("LDAP_TLS_REJECT_UNAUTHORIZED", "true") !== "false" },
-  });
+const tlsOptions = () => ({ rejectUnauthorized: env("LDAP_TLS_REJECT_UNAUTHORIZED", "true") !== "false" });
+
+/**
+ * LDAP client. TLS options are only passed for ldaps:// — ldapts switches to TLS whenever any
+ * TLS option is present, which would break plain ldap:// (and StartTLS) connections.
+ */
+export function ldapClient() {
+  const url = env("LDAP_URL");
+  return new Client({ url, timeout: 8000, connectTimeout: 5000, ...(/^ldaps:/i.test(url) ? { tlsOptions: tlsOptions() } : {}) });
+}
+
+/** Binds, upgrading a plain ldap:// connection with StartTLS first when LDAP_STARTTLS=true. */
+export async function ldapBind(c: Client, dn: string, password: string) {
+  if (env("LDAP_STARTTLS") === "true" && !/^ldaps:/i.test(env("LDAP_URL"))) await c.startTLS(tlsOptions());
+  await c.bind(dn, password);
 }
 
 /** Extract the CN from a DN (CN=IT-Admins,OU=Groups,... → IT-Admins). */
@@ -29,9 +37,9 @@ export type LdapResult =
 export async function ldapAuthenticate(username: string, password: string): Promise<LdapResult> {
   if (env("LDAP_ENABLED") !== "true") return { ok: false, reason: "disabled" };
   if (!username || !password) return { ok: false, reason: "invalid" }; // blocks unauthenticated bind
-  const svc = client();
+  const svc = ldapClient();
   try {
-    await svc.bind(env("LDAP_BIND_DN"), env("LDAP_BIND_PASSWORD"));
+    await ldapBind(svc, env("LDAP_BIND_DN"), env("LDAP_BIND_PASSWORD"));
   } catch (e) {
     console.error("LDAP service bind failed:", (e as Error).message);
     await svc.unbind().catch(() => {});
@@ -55,9 +63,9 @@ export async function ldapAuthenticate(username: string, password: string): Prom
     const entry = searchEntries[0];
 
     // Verify the password by binding as the user
-    const userClient = client();
+    const userClient = ldapClient();
     try {
-      await userClient.bind(entry.dn, password);
+      await ldapBind(userClient, entry.dn, password);
     } catch {
       return { ok: false, reason: "invalid" };
     } finally {

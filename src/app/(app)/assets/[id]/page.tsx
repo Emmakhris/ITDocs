@@ -16,6 +16,7 @@ import { seatsFor } from "@/server/modules/software";
 import { contractsForAsset } from "@/server/modules/vendors";
 import { recordsForAsset } from "@/server/modules/changes";
 import { diagramsFor } from "@/server/modules/diagrams";
+import { externalRefsFor } from "@/server/modules/sync";
 import { changeNo, incidentNo } from "@/server/lib/workflow";
 import { NotFoundError } from "@/server/lib/errors";
 import { db } from "@/server/db";
@@ -44,7 +45,7 @@ export default async function AssetDetail({
     if (e instanceof NotFoundError) notFound();
     throw e;
   });
-  const [movements, history, locations, settings, credentials, network, articles, seats, contracts, records, diagrams] = await Promise.all([
+  const [movements, history, locations, settings, credentials, network, articles, seats, contracts, records, diagrams, refs] = await Promise.all([
     assetMovements(ctx, a.id),
     entityHistory("Asset", a.id),
     locationTree(),
@@ -56,6 +57,7 @@ export default async function AssetDetail({
     contractsForAsset(ctx, a.id),
     recordsForAsset(ctx, a.id),
     diagramsFor(ctx, { assetId: a.id }),
+    externalRefsFor("Asset", a.id),
   ]);
   const atDate = sp.at ? new Date(sp.at) : null;
   const atResult = atDate && !Number.isNaN(atDate.getTime()) ? await assetAt(ctx, a.id, atDate) : null;
@@ -351,6 +353,24 @@ export default async function AssetDetail({
           )}
 
           {can(ctx.user.role, "software", "read") && seats.length > 0 && <SeatsCard seats={seats} emptyText="" />}
+
+          {refs.length > 0 && (
+            <Card title="Seen by">
+              <ul className="space-y-2 text-sm">
+                {refs.map((r) => {
+                  const d = r.data as Record<string, string | undefined>;
+                  return (
+                    <li key={r.id}>
+                      <span className="font-medium">{r.source === "intune" ? "Intune" : r.source === "sccm" ? "ConfigMgr" : r.source}</span>
+                      <span className="ml-1 text-xs text-muted">last {fmtDateTime(r.lastSeenAt)}</span>
+                      {d.complianceState && <Badge className="ml-1" tone={d.complianceState === "compliant" ? "green" : "amber"}>{d.complianceState}</Badge>}
+                      {d.user && <span className="block text-xs text-muted">user {d.user}</span>}
+                    </li>
+                  );
+                })}
+              </ul>
+            </Card>
+          )}
 
           {diagrams.length > 0 && (
             <Card title="Diagrams">

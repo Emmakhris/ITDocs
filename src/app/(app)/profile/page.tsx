@@ -1,6 +1,9 @@
 import QRCode from "qrcode";
 import { requireCtx } from "@/server/auth/session";
-import { ROLE_LABELS } from "@/server/rbac/permissions";
+import { ROLE_LABELS, can } from "@/server/rbac/permissions";
+import { API_MODULES, listTokens } from "@/server/modules/api-tokens";
+import { TokenList } from "@/components/token-list";
+import { TokenForm } from "./token-form";
 import { db } from "@/server/db";
 import { newTotpSecret } from "@/server/modules/users";
 import { getSettings } from "@/server/modules/settings";
@@ -59,6 +62,16 @@ export default async function ProfilePage() {
           </div>
         )}
       </div>
+
+      <Card title="API tokens" className="mt-4 max-w-5xl">
+        <p className="mb-3 text-sm text-muted">
+          For scripts and integrations using the <a className="text-brand hover:underline" href="/api/v1/openapi.json">REST API</a>. A token acts as you, with your role. Narrow it to read-only and to the modules it needs. Every change made with a token is recorded in the audit log.
+        </p>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <TokenForm modules={API_MODULES.filter((m) => can(ctx.user.role, m, "read"))} canWrite={API_MODULES.some((m) => can(ctx.user.role, m, "write"))} />
+          <TokenList tokens={await listTokens(ctx)} back="/profile" />
+        </div>
+      </Card>
     </>
   );
 }

@@ -9,6 +9,7 @@ import { AppError, FieldError, NotFoundError } from "../lib/errors";
 import { checkbox, nulls, optDate, optNum, optStr } from "../lib/forms";
 import { licenseState, seatUsage } from "../lib/renewals";
 import { aad, decrypt, encrypt } from "../crypto/vault";
+import { revealAllowed } from "./vault";
 import type { Ctx } from "../context";
 
 // Software catalogue, licences (keys encrypted with the vault master key) and seat assignments to
@@ -218,6 +219,7 @@ export async function revealLicenseKey(ctx: Ctx, id: string, purpose: "reveal" |
   const l = await db.license.findFirst({ where: { id, deletedAt: null }, select: { name: true, keyEnc: true } });
   if (!l) throw new NotFoundError("Licence");
   if (!l.keyEnc) throw new AppError("No key stored for this licence.");
+  await revealAllowed(ctx);
   const value = decrypt(l.keyEnc, aad.license(id));
   await audit(db, ctx, { action: "view_sensitive", entityType: "License", entityId: id, summary: `${purpose === "copy" ? "Copied" : "Revealed"} licence key of "${l.name}"` });
   return value;

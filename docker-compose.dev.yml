@@ -21,7 +21,8 @@ services:
       LDAP_ORGANISATION: "Example Hospital"
       LDAP_DOMAIN: "example.local"
       LDAP_ADMIN_PASSWORD: "admin"
-    ports: ["3389:389"]
+    # 1389, not 3389: on Windows 3389 is Remote Desktop
+    ports: ["1389:389"]
     volumes:
       - ./docker/ldap/seed.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/50-seed.ldif:ro
 

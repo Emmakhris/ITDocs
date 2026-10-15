@@ -54,7 +54,7 @@ export const moveInput = z.object({
   toAssigneeId: optStr(40),
   clearAssignee: checkbox,
   toStatus: z.nativeEnum(AssetStatus).optional(),
-  reason: z.string().trim().min(1, "A reason is required for the movement log").max(500),
+  reason: z.string({ error: "A reason is required for the movement log" }).trim().min(1, "A reason is required for the movement log").max(500),
   ticketRef: optStr(60),
   movedAt: optDate,
 });

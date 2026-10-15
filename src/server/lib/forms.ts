@@ -24,11 +24,20 @@ export function formToObject(fd: FormData): Record<string, unknown> {
   return out;
 }
 
+/**
+ * A readable message for a validation issue. Blank form fields arrive as undefined (see
+ * formToObject), which Zod reports as "expected string, received undefined" — that means the
+ * field is required.
+ */
+export function issueMessage(i: { code: string; message: string }) {
+  return i.code === "invalid_type" && /received undefined/.test(i.message) ? "This field is required" : i.message;
+}
+
 /** Convert thrown errors to an ActionState (rethrows Next.js redirect/notFound signals). */
 export function toActionError(e: unknown): ActionState {
   if (e instanceof ZodError) {
     const fieldErrors: Record<string, string> = {};
-    for (const i of e.issues) fieldErrors[i.path.join(".") || "_"] ??= i.message;
+    for (const i of e.issues) fieldErrors[i.path.join(".") || "_"] ??= issueMessage(i);
     return { error: "Please fix the highlighted fields.", fieldErrors };
   }
   if (e instanceof FieldError) return { error: e.message, fieldErrors: e.fieldErrors };

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { LIMITS, hit } from "@/server/lib/rate-limit";
 import { getCtx } from "@/server/auth/session";
 import { can } from "@/server/rbac/permissions";
 import { db } from "@/server/db";
@@ -7,6 +8,8 @@ import { accessibleFolderIds } from "@/server/modules/vault";
 export async function GET(req: Request, { params }: { params: Promise<{ kind: string }> }) {
   const ctx = await getCtx();
   if (!ctx) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const rl = await hit(`search:${ctx.user.id}`, LIMITS.search);
+  if (!rl.allowed) return NextResponse.json({ error: "Too many requests" }, { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } });
   const { kind } = await params;
   const q = (new URL(req.url).searchParams.get("q") ?? "").trim().slice(0, 100);
   const ci = { contains: q, mode: "insensitive" as const };

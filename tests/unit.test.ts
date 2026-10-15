@@ -63,3 +63,13 @@ describe("audit diff", () => {
     expect(d.before).toEqual({ a: 1 });
   });
 });
+
+describe("form errors", () => {
+  it("turns Zod's 'received undefined' into a required-field message", async () => {
+    const { toActionError } = await import("@/server/lib/forms");
+    const { z } = await import("zod");
+    const r = z.object({ title: z.string().min(1, "Title is required"), n: z.number() }).safeParse({ title: "" , n: undefined });
+    const s = toActionError(r.error);
+    expect(s.fieldErrors).toEqual({ title: "Title is required", n: "This field is required" });
+  });
+});

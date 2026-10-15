@@ -91,6 +91,7 @@ export default async function PersonDetail({ params, searchParams }: { params: P
               ["Phone", p.phone],
               ["Employee ID", p.employeeId],
               ["Status", p.active ? "Active" : "Inactive"],
+              ["Source", p.adGuid ? "Synced from the directory" : "Entered in ITDocs"],
             ]}
           />
         </Card>

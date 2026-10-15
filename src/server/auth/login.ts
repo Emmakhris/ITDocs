@@ -5,11 +5,13 @@ import { db } from "../db";
 import { audit } from "../audit/log";
 import { ldapAuthenticate } from "./ldap";
 import { createSession, requestMeta } from "./session";
+import { LIMITS, hit, peek, reset } from "../lib/rate-limit";
 
-// Simple in-memory brute-force throttle (per username+IP). Fine for a single app container.
-const failures = new Map<string, { count: number; until: number }>();
-const MAX_FAILS = 5;
-const LOCK_MS = 15 * 60_000;
+// Brute-force protection (shared by all app instances via the RateLimit table):
+// 5 failures per username + IP lock that pair for 15 minutes, and one IP gets 50 attempts per
+// 15 minutes across all usernames (password spraying).
+
+const LOCK = LIMITS.loginFailures;
 
 export type LoginResult =
   | { ok: true }
@@ -18,22 +20,24 @@ export type LoginResult =
 export async function login(usernameRaw: string, password: string, totp?: string): Promise<LoginResult> {
   const username = usernameRaw.trim().toLowerCase().replace(/^.*\\/, ""); // accept DOMAIN\user
   const meta = await requestMeta();
-  const key = `${username}|${meta.ip ?? ""}`;
-  const f = failures.get(key);
-  if (f && f.until > Date.now()) {
-    return { ok: false, error: "Too many failed attempts. Try again in a few minutes." };
+  const failKey = `login-fail:${username}|${meta.ip ?? ""}`;
+  const who = { user: { id: "", username, displayName: username, role: "READONLY" as const }, ...meta };
+  const locked = await peek(failKey, LOCK);
+  if (locked.count >= LOCK.limit) {
+    return { ok: false, error: `Too many failed attempts. Try again in ${Math.ceil(locked.retryAfterSec / 60)} minute(s).` };
+  }
+  const perIp = await hit(`login-ip:${meta.ip ?? "unknown"}`, LIMITS.loginPerIp);
+  if (!perIp.allowed) {
+    if (perIp.count === LIMITS.loginPerIp.limit + 1)
+      await audit(db, who, { action: "login_locked", entityType: "User", summary: `Sign-in attempts from ${meta.ip ?? "unknown IP"} blocked for ${Math.ceil(perIp.retryAfterSec / 60)} min (too many attempts)` }).catch(() => {});
+    return { ok: false, error: "Too many sign-in attempts from this address. Try again later." };
   }
 
   const fail = async (reason: string, error = "Invalid username or password.") => {
-    const cur = failures.get(key) ?? { count: 0, until: 0 };
-    cur.count++;
-    if (cur.count >= MAX_FAILS) cur.until = Date.now() + LOCK_MS;
-    failures.set(key, cur);
-    await audit(db, { user: { id: "", username, displayName: username, role: "READONLY" }, ...meta }, {
-      action: "login_failed",
-      entityType: "User",
-      summary: `Failed login for "${username}": ${reason}`,
-    }).catch(() => {});
+    const r = await hit(failKey, LOCK);
+    await audit(db, who, { action: "login_failed", entityType: "User", summary: `Failed login for "${username}": ${reason}` }).catch(() => {});
+    if (r.count === LOCK.limit)
+      await audit(db, who, { action: "login_locked", entityType: "User", summary: `"${username}" locked out for 15 min from ${meta.ip ?? "unknown IP"} after ${LOCK.limit} failed attempts` }).catch(() => {});
     return { ok: false as const, error };
   };
 
@@ -81,7 +85,7 @@ async function finish(
   method: string,
 ): Promise<LoginResult> {
   const user = await db.user.update({ where: { id: userId }, data: { lastLoginAt: new Date() } });
-  for (const k of failures.keys()) if (k.startsWith(user.username + "|")) failures.delete(k);
+  await reset(`login-fail:${user.username}|${meta.ip ?? ""}`);
   await createSession(userId);
   await audit(db, { user: { id: userId, username: user.username, displayName, role }, ...meta }, {
     action: "login",

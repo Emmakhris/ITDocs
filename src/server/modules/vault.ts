@@ -9,6 +9,7 @@ import { assertCan, can } from "../rbac/permissions";
 import { AppError, ForbiddenError, NotFoundError } from "../lib/errors";
 import { checkbox, optNum, optStr } from "../lib/forms";
 import { aad, decrypt, encrypt } from "../crypto/vault";
+import { LIMITS, hit } from "../lib/rate-limit";
 import type { Ctx } from "../context";
 
 // ───────────────────────────── Access control ─────────────────────────────
@@ -327,6 +328,15 @@ export async function getCredential(ctx: Ctx, id: string) {
   return { ...safe, hasTotp: !!totpEnc, folder: { id: folder.id, name: folder.name, restricted: folder.restricted }, myAccess: access, history, assets };
 }
 
+/** Caps how many secrets one person can reveal in a short time; hitting the cap is itself audited. */
+export async function revealAllowed(ctx: Ctx) {
+  const r = await hit(`reveal:${ctx.user.id}`, LIMITS.reveal);
+  if (r.allowed) return;
+  if (r.count === LIMITS.reveal.limit + 1)
+    await audit(db, ctx, { action: "reveal_limited", entityType: "Credential", summary: `${ctx.user.displayName} hit the reveal limit (${LIMITS.reveal.limit} in 10 minutes)` });
+  throw new AppError(`Too many secrets revealed in a short time. Try again in ${Math.ceil(r.retryAfterSec / 60)} minute(s).`, 429);
+}
+
 export type RevealWhat = { field: "password" } | { field: "totp" } | { field: "history"; historyId: string };
 
 /**
@@ -335,6 +345,7 @@ export type RevealWhat = { field: "password" } | { field: "totp" } | { field: "h
  */
 export async function reveal(ctx: Ctx, id: string, what: RevealWhat, purpose: "reveal" | "copy" = "reveal") {
   const { cred } = await requireCredential(ctx, id, "view");
+  await revealAllowed(ctx);
   let value: string;
   let label: string;
   if (what.field === "password") {

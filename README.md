@@ -1,6 +1,6 @@
 # ITDocs — IT Documentation Management System
 
-Self-hosted web app for documenting IT: assets and **where they have moved**, locations, people, credentials, network, a knowledge base, software & licences, vendors & contracts, changes & incidents, a daily tech journal, diagrams, reports and email/Teams alerts. It is built for hospitals but works for any industry; medical-device features can be switched off.
+Self-hosted web app for documenting IT: assets and **where they have moved**, locations, people, credentials, network, a knowledge base, software & licences, vendors & contracts, changes & incidents, a daily tech journal, diagrams, reports, email/Teams alerts, a REST API and AD/Intune/SCCM sync. It is built for hospitals but works for any industry; medical-device features can be switched off.
 
 ## Status
 
@@ -14,8 +14,8 @@ Self-hosted web app for documenting IT: assets and **where they have moved**, lo
 | 6 | Software & licences (encrypted keys, seat assignment, over-allocation and reclaim warnings), vendors & contracts (support contacts, notice-period reminders, covered assets, documents), renewals view | ✅ done |
 | 7 | Changes with approval workflow, risk and clash warnings; incidents with timelines, root cause and time-to-resolve; daily tech / on-call journal | ✅ done |
 | 8 | Diagrams (versioned uploads, linked to locations and assets), relationship map, 13 built-in reports with CSV / Excel / print and scheduled email, email + Teams alerts (daily digest, P1/P2 incidents) | ✅ done |
-| 9 | REST API + tokens, AD/Intune/SCCM sync | planned |
-| 10 | Hardening: rate limits, CSP, e2e suite | planned |
+| 9 | REST API (OpenAPI) with scoped personal access tokens; Active Directory people sync; Intune and ConfigMgr device sync with dry-run previews | ✅ done |
+| 10 | Hardening: database-backed rate limits, nonce-based Content Security Policy, health check, end-to-end test suite | ✅ done |
 
 ## Key features (phases 1–2)
 
@@ -103,6 +103,49 @@ npm run vault:rotate                   # re-encrypts everything; safe to re-run
   - Every attempt is recorded in a delivery log. The same alert never goes out twice, even if several app instances run the scheduler.
   - Set up `SMTP_*` and `TEAMS_WEBHOOK_URL` in `.env` (see `.env.example`), then use **Send test** on the Alerts page. The scheduler runs inside the app every 5 minutes; set `TZ` so the digest hour matches local time.
 
+## API & integrations (phase 9)
+
+- **REST API** at `/api/v1`, described at **`/api/v1/openapi.json`**. It covers assets (list, get, create, partial update, move, history), asset types, locations, people, subnets (and next-free IP allocation), changes, incidents (list and open — handy for monitoring tools), search and reports.
+- **Tokens.** Everyone creates their own on **My profile › API tokens**. A token acts as its owner with the owner's role, and can be narrowed to **read-only** and to **specific modules**, with an expiry. Only a hash is stored and the token is shown once. Writes are audited like any other change (the audit entry shows `api:itd_…`). Admins see and revoke all tokens under Admin › Integrations & API.
+  - The API only accepts `Authorization: Bearer itd_…`, never the browser session cookie, so a malicious web page can't make calls on a signed-in user's behalf.
+  - The password vault, admin settings, and vault and audit reports are not available through the API.
+
+  ```bash
+  curl -H "Authorization: Bearer itd_…" "https://itdocs.example.local/api/v1/assets?q=latitude&pageSize=20"
+  curl -X POST -H "Authorization: Bearer itd_…" -H "Content-Type: application/json"        -d '{"title":"Core switch down","severity":"P1"}' https://itdocs.example.local/api/v1/incidents
+  ```
+- **Sync** (Admin › Integrations & API). Every source has **Preview (dry run)**, and every run is logged with the full list of changes.
+  - **Active Directory → people.** Creates and updates people. People already entered by hand are matched on employee ID or email. Disabled or removed accounts are deactivated, never deleted, and a run that would deactivate more than 20% of directory people stops unless you tick the override.
+  - **Intune → devices** (Microsoft Graph). Matches devices to assets: an existing link first, then serial number, then hostname. Hostname and OS are updated; make, model and serial are filled in if empty. Last check-in, compliance state and primary user are shown on the asset. **Location and assignee are never changed** — moves stay in the movement log. Unknown devices are listed, or created if you tick that box.
+  - **ConfigMgr (SCCM) → devices** from a CSV export. Columns: Name, SerialNumber, Manufacturer, Model, OperatingSystem, LastLogonUser, ResourceID; the raw view names such as `Netbios_Name0` also work. A suitable query against the ConfigMgr database:
+    ```sql
+    SELECT s.ResourceID, s.Netbios_Name0 AS Name, b.SerialNumber0 AS SerialNumber, c.Manufacturer0 AS Manufacturer,
+           c.Model0 AS Model, o.Caption0 AS OperatingSystem, s.User_Name0 AS LastLogonUser
+    FROM v_R_System s
+    LEFT JOIN v_GS_PC_BIOS b ON b.ResourceID = s.ResourceID
+    LEFT JOIN v_GS_COMPUTER_SYSTEM c ON c.ResourceID = s.ResourceID
+    LEFT JOIN v_GS_OPERATING_SYSTEM o ON o.ResourceID = s.ResourceID
+    WHERE s.Obsolete0 = 0
+    ```
+  - Set `SYNC_AUTO=ad,intune` to run those syncs daily. See `.env.example` for the Intune app registration and the LDAP attribute settings.
+
+## Security hardening (phase 10)
+
+- **Rate limits** are stored in the database, so they're shared by every app instance and survive restarts. When a limit is hit, the response is `429` with `Retry-After`; for API tokens the `X-RateLimit-*` headers show the remaining allowance.
+
+  | What | Limit |
+  |---|---|
+  | Failed sign-ins per username + IP | 5 in 15 min, then locked out for 15 min (audited) |
+  | Sign-in attempts per IP | 50 in 15 min, to stop password spraying |
+  | REST API calls per token | 600 per minute (`API_RATE_LIMIT`) |
+  | Vault and licence-key reveals per person | 60 in 10 min (hitting the cap is audited) |
+  | Search and lookups per person | 240 per minute |
+
+- **Content Security Policy.** Each page gets a fresh nonce, so only the app's own scripts can run, and injected markup can't execute anything. Pages can't be framed, plugins are blocked, and forms can only post to the app. Other headers set: HSTS, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, COOP and CORP.
+- **Uploaded files** are always served as downloads (diagram images excepted) with a sandboxed CSP. Their type is checked by content, not file name.
+- **`/api/health`** reports only `ok` or `error`. The Docker Compose file uses it as the app's healthcheck.
+- **End-to-end tests** (Playwright) drive a real browser through sign-in, assets, the movement log, the vault, the API, the security headers and the rate limits. See *Development*.
+
 ## Production install (Docker, Linux)
 
 ```bash
@@ -149,20 +192,27 @@ npm run db:seed           # demo hospital data + break-glass admin from .env
 npm run dev               # http://localhost:3000
 ```
 
-If Docker is available, `docker compose -f docker-compose.dev.yml up -d` starts Postgres **and an OpenLDAP server that simulates AD**. Test users are `aadmin`, `jtech`, `rviewer` and `nogroup`, all with password `Passw0rd!`.
+If Docker is available, `docker compose -f docker-compose.dev.yml up -d` starts Postgres **and an OpenLDAP server that simulates AD** on `ldap://localhost:1389`. (Port 3389 is avoided because it is Windows Remote Desktop.) Test users are `aadmin`, `jtech`, `rviewer` and `nogroup`, all with password `Passw0rd!`. OpenLDAP isn't AD, so for the people sync set `LDAP_SYNC_FILTER=(objectClass=inetOrgPerson)`, `LDAP_SYNC_ID_ATTR=entryUUID` and `LDAP_SYNC_EMPLOYEEID_ATTR=employeeNumber`.
 
 ### Tests
 
 ```bash
 DATABASE_URL=postgresql://itdocs:itdocs@localhost:5433/itdocs_test npx prisma migrate deploy   # once
-npm test                                                   # unit + integration (movement, check-out, disposal, RBAC, immutability, vault)
+npm test                                                   # unit + integration tests (Vitest)
 DATABASE_URL=...itdocs_test npm run db:seed-large -- 50000 && PERF=1 npx vitest run tests/perf.test.ts
+```
+
+End-to-end tests drive a real browser (Playwright) against a production build on port 3100 and a separate `itdocs_e2e` database. Before each run its migrations are applied and the seed is run; both are non-destructive, and the tests use unique names, so nothing is wiped. The setup refuses any database whose name doesn't end in `_e2e`.
+
+```bash
+npx playwright install chromium   # once
+npm run test:e2e                  # report in playwright-report/
 ```
 
 ## Architecture
 
 - Next.js 15 (App Router, server actions) + TypeScript; PostgreSQL 16 + Prisma; Tailwind CSS. System fonts only, so it builds offline / air-gapped.
-- **All writes go through `src/server/modules/*`**, which enforce RBAC and write the audit log in the same transaction. Pages and (later) the REST API call these services.
+- **All writes go through `src/server/modules/*`**, which enforce RBAC and write the audit log in the same transaction. Pages, server actions and the REST API (`src/app/api/v1`, via `src/server/api/handler.ts`) all call these services.
 - `src/server/modules/assets.ts › recordMovement()` is the single function that writes movement history.
 - `src/server/crypto/vault.ts` is the only code that touches vault keys; `src/server/modules/vault.ts › reveal()` is the only path that returns a decrypted secret.
 - Sessions are random tokens stored hashed in the DB, with an idle timeout (`SESSION_IDLE_MINUTES`) and a maximum lifetime. Disabling a user kills their sessions.
