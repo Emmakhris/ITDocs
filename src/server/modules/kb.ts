@@ -1,7 +1,4 @@
 import "server-only";
-import crypto from "node:crypto";
-import fs from "node:fs/promises";
-import path from "node:path";
 import { z } from "zod";
 import { ArticleStatus, Prisma } from "@prisma/client";
 import { db, type Tx } from "../db";
@@ -9,6 +6,7 @@ import { audit, diff } from "../audit/log";
 import { assertCan, can } from "../rbac/permissions";
 import { AppError, FieldError, NotFoundError } from "../lib/errors";
 import { checkbox, optNum, optStr } from "../lib/forms";
+import { readStoredFile, removeStoredFile, storeFile } from "../lib/storage";
 import type { Ctx } from "../context";
 
 // Knowledge base: Markdown articles with full version history, templates, tags, review cycles,
@@ -16,7 +14,6 @@ import type { Ctx } from "../context";
 // drafts and templates are only visible to people who can write to the KB.
 
 const DAY = 86_400_000;
-export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const LINKABLE = ["Asset", "Location"] as const;
 export type LinkableType = (typeof LINKABLE)[number];
 
@@ -376,34 +373,18 @@ export async function unlinkArticle(ctx: Ctx, articleId: string, toType: string,
 
 // ───────────────────────────── Attachments ─────────────────────────────
 
-const uploadRoot = () => path.resolve(process.env.UPLOAD_DIR || "./data/uploads");
-/** Storage keys are random and never derived from the user's file name. */
-const filePath = (storageKey: string) => {
-  if (!/^kb\/[a-f0-9]{32}$/.test(storageKey)) throw new AppError("Invalid storage key.");
-  return path.join(uploadRoot(), storageKey);
-};
-export const safeFileName = (name: string) =>
-  (name.split(/[\\/]/).pop() ?? "file").replace(/[\u0000-\u001f"<>:|?*]/g, "_").replace(/^\.+/, "").slice(0, 150) || "file";
-
 export async function addAttachment(ctx: Ctx, articleId: string, file: File | null | undefined) {
   assertCan(ctx.user.role, "kb", "write");
-  if (!file || typeof file === "string" || !file.size) throw new FieldError({ file: "Choose a file" });
-  if (file.size > MAX_ATTACHMENT_BYTES) throw new FieldError({ file: "Files can be at most 10 MB" });
   const a = await loadVisible(ctx, articleId);
-  const storageKey = `kb/${crypto.randomBytes(16).toString("hex")}`;
-  const dest = filePath(storageKey);
-  await fs.mkdir(path.dirname(dest), { recursive: true });
-  await fs.writeFile(dest, Buffer.from(await file.arrayBuffer()), { flag: "wx" });
+  const stored = await storeFile("kb", file);
   try {
     return await db.$transaction(async (tx) => {
-      const att = await tx.attachment.create({
-        data: { entityType: "Article", entityId: articleId, fileName: safeFileName(file.name), mimeType: (file.type || "application/octet-stream").slice(0, 100), size: file.size, storageKey, uploadedBy: ctx.user.displayName },
-      });
+      const att = await tx.attachment.create({ data: { ...stored, entityType: "Article", entityId: articleId, uploadedBy: ctx.user.displayName } });
       await audit(tx, ctx, { action: "attach", entityType: "Article", entityId: articleId, summary: `Attached ${att.fileName} (${Math.ceil(att.size / 1024)} KB) to "${a.title}"` });
       return att;
     });
   } catch (e) {
-    await fs.rm(dest, { force: true });
+    await removeStoredFile(stored.storageKey);
     throw e;
   }
 }
@@ -413,7 +394,7 @@ export async function readAttachment(ctx: Ctx, id: string) {
   const att = await db.attachment.findUnique({ where: { id } });
   if (!att || att.entityType !== "Article") throw new NotFoundError("File");
   await loadVisible(ctx, att.entityId);
-  return { att, data: await fs.readFile(filePath(att.storageKey)) };
+  return { att, data: await readStoredFile(att.storageKey) };
 }
 
 export async function removeAttachment(ctx: Ctx, id: string) {
@@ -424,6 +405,6 @@ export async function removeAttachment(ctx: Ctx, id: string) {
     await tx.attachment.delete({ where: { id } });
     await audit(tx, ctx, { action: "detach", entityType: "Article", entityId: att.entityId, summary: `Removed attachment ${att.fileName}` });
   });
-  await fs.rm(filePath(att.storageKey), { force: true });
+  await removeStoredFile(att.storageKey);
   return att.entityId;
 }

@@ -14,9 +14,9 @@ export async function SubnetsTab({ ctx, sp, writable }: TabProps) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <form className="flex gap-2">
+        <form className="grid gap-2 sm:grid-cols-[minmax(0,22rem)_auto]">
           <input type="hidden" name="tab" value="subnets" />
-          <Input name="q" defaultValue={sp.q} placeholder="Filter by name or network…" className="w-64" aria-label="Filter subnets" />
+          <Input name="q" defaultValue={sp.q} placeholder="Filter by name or network…" aria-label="Filter subnets" />
           <Button variant="secondary">Filter</Button>
         </form>
         {writable && !sp.edit && <LinkButton href="/network?tab=subnets&edit=new" variant="primary">New subnet</LinkButton>}

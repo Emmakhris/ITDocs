@@ -1,14 +1,27 @@
 import { NextResponse } from "next/server";
 import { getCtx } from "@/server/auth/session";
+import { db } from "@/server/db";
 import { readAttachment } from "@/server/modules/kb";
-import { AppError } from "@/server/lib/errors";
+import { readContractFile } from "@/server/modules/vendors";
+import { AppError, NotFoundError } from "@/server/lib/errors";
+import type { Ctx } from "@/server/context";
 
-/** Downloads a knowledge-base attachment. Always served as a download, never rendered inline. */
+// Each attachment type is read through its own module, which checks the reader may see the record.
+const readers: Record<string, (ctx: Ctx, id: string) => ReturnType<typeof readAttachment>> = {
+  Article: readAttachment,
+  Contract: readContractFile,
+};
+
+/** Downloads an attachment. Always served as a download, never rendered inline. */
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await getCtx();
   if (!ctx) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   try {
-    const { att, data } = await readAttachment(ctx, (await params).id);
+    const id = (await params).id;
+    const kind = (await db.attachment.findUnique({ where: { id }, select: { entityType: true } }))?.entityType;
+    const read = kind ? readers[kind] : undefined;
+    if (!read) throw new NotFoundError("File");
+    const { att, data } = await read(ctx, id);
     const ascii = att.fileName.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
     return new NextResponse(new Uint8Array(data), {
       headers: {

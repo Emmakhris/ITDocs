@@ -90,6 +90,30 @@ export async function globalSearch(ctx: Ctx, q: string, limit = 8): Promise<Sear
         }),
     );
   }
+  if (can(ctx.user.role, "vendors", "read")) {
+    tasks.push(
+      db.vendor.findMany({ where: { deletedAt: null, OR: [{ name: ci }, { accountNumber: ci }] }, take: limit }).then((rows) => {
+        for (const v of rows) hits.push({ kind: "Vendor", id: v.id, title: v.name, subtitle: [v.supportPhone && `support ${v.supportPhone}`, v.accountNumber && `acct ${v.accountNumber}`].filter(Boolean).join(" · ") || undefined, href: `/vendors/${v.id}` });
+      }),
+      db.contract
+        .findMany({ where: { deletedAt: null, OR: [{ title: ci }, { reference: ci }] }, include: { vendor: { select: { name: true } } }, take: limit })
+        .then((rows) => {
+          for (const c of rows) hits.push({ kind: "Contract", id: c.id, title: c.title, subtitle: [c.vendor.name, c.reference, c.endDate && `ends ${c.endDate.toISOString().slice(0, 10)}`].filter(Boolean).join(" · "), href: `/vendors/contracts/${c.id}` });
+        }),
+    );
+  }
+  if (can(ctx.user.role, "software", "read")) {
+    tasks.push(
+      db.software.findMany({ where: { deletedAt: null, OR: [{ name: ci }, { category: ci }] }, include: { vendor: { select: { name: true } } }, take: limit }).then((rows) => {
+        for (const s of rows) hits.push({ kind: "Software", id: s.id, title: s.name, subtitle: [s.vendor?.name, s.category].filter(Boolean).join(" · ") || undefined, href: `/software/${s.id}` });
+      }),
+      db.license
+        .findMany({ where: { deletedAt: null, OR: [{ name: ci }, { poNumber: ci }] }, include: { software: { select: { name: true } } }, take: limit })
+        .then((rows) => {
+          for (const l of rows) hits.push({ kind: "Licence", id: l.id, title: `${l.software.name} — ${l.name}`, subtitle: l.poNumber ? `PO ${l.poNumber}` : undefined, href: `/software/licenses/${l.id}` });
+        }),
+    );
+  }
   if (can(ctx.user.role, "network", "read")) {
     const ipPrefix = /^[\d.]+$/.test(term);
     tasks.push(

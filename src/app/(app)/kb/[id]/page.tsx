@@ -132,7 +132,7 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
                   <li key={f.id} className="flex items-start gap-2">
                     <Paperclip className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted" aria-hidden />
                     <span className="min-w-0 flex-1">
-                      <a href={`/api/kb/files/${f.id}`} className="break-all text-brand hover:underline">{f.fileName}</a>
+                      <a href={`/api/files/${f.id}`} className="break-all text-brand hover:underline">{f.fileName}</a>
                       <span className="block text-xs text-muted">{size(f.size)} · {f.uploadedBy}</span>
                     </span>
                     {writable && (

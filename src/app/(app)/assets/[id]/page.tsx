@@ -10,6 +10,10 @@ import { credentialsForAsset } from "@/server/modules/vault";
 import { assetNetwork } from "@/server/modules/network";
 import { articlesFor } from "@/server/modules/kb";
 import { DocumentationCard } from "@/components/kb-links";
+import { SeatsCard } from "@/components/seats-card";
+import { RenewalBadge } from "@/components/renewal-badge";
+import { seatsFor } from "@/server/modules/software";
+import { contractsForAsset } from "@/server/modules/vendors";
 import { NotFoundError } from "@/server/lib/errors";
 import { db } from "@/server/db";
 import { Badge, Card, DL, LinkButton, PageHeader, StatusBadge, fmtDate, fmtDateTime, Input, Button } from "@/components/ui";
@@ -37,7 +41,7 @@ export default async function AssetDetail({
     if (e instanceof NotFoundError) notFound();
     throw e;
   });
-  const [movements, history, locations, settings, credentials, network, articles] = await Promise.all([
+  const [movements, history, locations, settings, credentials, network, articles, seats, contracts] = await Promise.all([
     assetMovements(ctx, a.id),
     entityHistory("Asset", a.id),
     locationTree(),
@@ -45,6 +49,8 @@ export default async function AssetDetail({
     credentialsForAsset(ctx, a.id),
     assetNetwork(ctx, a.id),
     articlesFor(ctx, "Asset", a.id),
+    seatsFor(ctx, { assetId: a.id }),
+    contractsForAsset(ctx, a.id),
   ]);
   const atDate = sp.at ? new Date(sp.at) : null;
   const atResult = atDate && !Number.isNaN(atDate.getTime()) ? await assetAt(ctx, a.id, atDate) : null;
@@ -300,6 +306,24 @@ export default async function AssetDetail({
               <p className="whitespace-pre-wrap text-sm">{a.notes}</p>
             </Card>
           )}
+
+          {can(ctx.user.role, "vendors", "read") && contracts.length > 0 && (
+            <Card title="Support contracts">
+              <ul className="space-y-2 text-sm">
+                {contracts.map((c) => (
+                  <li key={c.id}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link className="text-brand hover:underline" href={`/vendors/contracts/${c.id}`}>{c.title}</Link>
+                      <RenewalBadge state={c.state} date={c.state === "expired" ? c.endDate : c.noticeBy} />
+                    </div>
+                    <p className="text-xs text-muted">{[c.vendor.name, c.vendor.supportPhone && `support ${c.vendor.supportPhone}`, c.sla].filter(Boolean).join(" · ")}</p>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+
+          {can(ctx.user.role, "software", "read") && seats.length > 0 && <SeatsCard seats={seats} emptyText="" />}
 
           {can(ctx.user.role, "kb", "read") && <DocumentationCard articles={articles} canWrite={can(ctx.user.role, "kb", "write")} />}
 

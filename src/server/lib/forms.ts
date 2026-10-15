@@ -59,3 +59,13 @@ export const checkbox = z
   .union([z.string(), z.boolean()])
   .optional()
   .transform((v) => v === true || v === "on" || v === "true");
+
+/**
+ * Optional fields → null so an edit can clear them. Zod drops absent optional keys from its
+ * output, so the full key list comes from the schema rather than the parsed object.
+ */
+export function nulls<S extends z.ZodObject, T extends Record<string, unknown>>(schema: S, o: T): { [K in keyof T]-?: undefined extends T[K] ? Exclude<T[K], undefined> | null : T[K] } {
+  const out: Record<string, unknown> = Object.fromEntries(Object.keys(schema.shape).map((k) => [k, null]));
+  for (const [k, v] of Object.entries(o)) out[k] = v === undefined ? null : v;
+  return out as never;
+}

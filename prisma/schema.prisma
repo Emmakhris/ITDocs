@@ -1,5 +1,5 @@
 // ITDocs — IT Documentation Management System
-// Phase 1 (foundation) + Phase 2 (locations, assets, movement) + Phase 3 (vault) + Phase 4 (network) + Phase 5 (knowledge base)
+// Phase 1 (foundation) + Phase 2 (locations, assets, movement) + Phase 3 (vault) + Phase 4 (network) + Phase 5 (knowledge base) + Phase 6 (software, vendors)
 
 generator client {
   provider        = "prisma-client-js"
@@ -131,6 +131,7 @@ model Person {
 
   assets    Asset[]
   checkouts Checkout[]
+  licenseSeats LicenseAssignment[]
 
   @@index([name])
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Person_name_trgm")
@@ -254,6 +255,9 @@ model Asset {
   switchPorts    SwitchPort[] @relation("SwitchPorts")
   connectedPorts SwitchPort[] @relation("PortConnectedAsset")
   rackMount      RackMount?
+
+  // Software (phase 6)
+  licenseSeats LicenseAssignment[]
 
   @@index([status])
   @@index([locationId])
@@ -443,6 +447,7 @@ model Credential {
 
   history      CredentialHistory[]
   wifiNetworks WifiNetwork[]
+  contracts    Contract[]
 
   @@index([folderId])
   @@index([rotationDueAt])
@@ -693,4 +698,162 @@ model ArticleVersion {
   createdAt    DateTime @default(now())
 
   @@unique([articleId, version])
+}
+
+// ───────────────────────────── Vendors & contracts (phase 6) ─────────────────────────────
+
+model Vendor {
+  id            String    @id @default(cuid())
+  name          String    @unique
+  website       String?
+  phone         String?
+  email         String?
+  accountNumber String?
+  supportPhone  String?
+  supportEmail  String?
+  supportUrl    String?
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  contacts  VendorContact[]
+  contracts Contract[]
+  software  Software[]
+  licenses  License[]
+
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Vendor_name_trgm")
+}
+
+model VendorContact {
+  id        String   @id @default(cuid())
+  vendorId  String
+  vendor    Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  name      String
+  role      String? // account manager, support engineer, escalation…
+  email     String?
+  phone     String?
+  notes     String?
+  createdAt DateTime @default(now())
+
+  @@index([vendorId])
+}
+
+enum ContractType {
+  SUPPORT
+  MAINTENANCE
+  WARRANTY
+  LEASE
+  SUBSCRIPTION
+  SERVICE
+  OTHER
+}
+
+model Contract {
+  id           String       @id @default(cuid())
+  vendorId     String
+  vendor       Vendor       @relation(fields: [vendorId], references: [id])
+  title        String
+  type         ContractType @default(SUPPORT)
+  reference    String? // contract / agreement number
+  startDate    DateTime?
+  endDate      DateTime?
+  /// Days before endDate by which notice must be given (to cancel or renegotiate)
+  noticeDays   Int?
+  autoRenew    Boolean      @default(false)
+  annualCost   Decimal?     @db.Decimal(12, 2)
+  sla          String? // e.g. "4h response, next-business-day parts"
+  ownerName    String?
+  /// Vault entry holding the support-portal login
+  credentialId String?
+  credential   Credential?  @relation(fields: [credentialId], references: [id], onDelete: SetNull)
+  notes        String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  deletedAt    DateTime?
+
+  licenses License[]
+
+  @@index([vendorId])
+  @@index([endDate])
+}
+
+// ───────────────────────────── Software & licences (phase 6) ─────────────────────────────
+// Licence keys are encrypted with the vault master key (src/server/crypto/vault.ts, aad.license).
+
+model Software {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  vendorId  String?
+  vendor    Vendor?   @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  category  String? // e.g. Clinical, Productivity, Security
+  website   String?
+  notes     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  licenses License[]
+
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Software_name_trgm")
+}
+
+enum LicenseModel {
+  PERPETUAL
+  SUBSCRIPTION
+}
+
+enum SeatBasis {
+  DEVICE
+  USER
+  CONCURRENT
+  SITE
+}
+
+model License {
+  id                String       @id // generated in code: needed before encrypting the key (bound as AAD)
+  softwareId        String
+  software          Software     @relation(fields: [softwareId], references: [id])
+  name              String // e.g. "Office 365 E3 — 2026 agreement"
+  model             LicenseModel @default(SUBSCRIPTION)
+  seatBasis         SeatBasis    @default(USER)
+  /// null = unlimited (site licence)
+  seats             Int?
+  keyEnc            String?
+  vendorId          String?
+  vendor            Vendor?      @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  contractId        String?
+  contract          Contract?    @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  poNumber          String?
+  purchaseDate      DateTime?
+  cost              Decimal?     @db.Decimal(12, 2)
+  expiresAt         DateTime?
+  notes             String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  deletedAt         DateTime?
+
+  assignments LicenseAssignment[]
+
+  @@index([softwareId])
+  @@index([expiresAt])
+}
+
+/// A seat: one licence used by one device or one person.
+model LicenseAssignment {
+  id         String   @id @default(cuid())
+  licenseId  String
+  license    License  @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+  assetId    String?
+  asset      Asset?   @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  personId   String?
+  person     Person?  @relation(fields: [personId], references: [id], onDelete: Cascade)
+  assignedAt DateTime @default(now())
+  assignedBy String
+  notes      String?
+
+  @@unique([licenseId, assetId])
+  @@unique([licenseId, personId])
+  @@index([assetId])
+  @@index([personId])
 }

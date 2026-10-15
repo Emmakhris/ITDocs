@@ -50,9 +50,9 @@ export async function PortsTab({ ctx, sp, writable }: TabProps) {
       </Card>
 
       <div className="min-w-0 space-y-4">
-        <form className="flex gap-2">
+        <form className="grid gap-2 sm:grid-cols-[minmax(0,22rem)_auto]">
           <input type="hidden" name="tab" value="ports" />
-          <Input name="q" defaultValue={sp.q} placeholder="Find by wall jack, patch port, device…" className="w-72" aria-label="Search ports" />
+          <Input name="q" defaultValue={sp.q} placeholder="Find by wall jack, patch port, device…" aria-label="Search ports" />
           <Button variant="secondary">Search</Button>
         </form>
 

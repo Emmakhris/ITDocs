@@ -2,6 +2,8 @@ import Link from "next/link";
 import { requireCtx } from "@/server/auth/session";
 import { dashboardData } from "@/server/modules/dashboard";
 import { reviewDueCount } from "@/server/modules/kb";
+import { renewals } from "@/server/modules/vendors";
+import { overAllocated } from "@/server/modules/software";
 import { can } from "@/server/rbac/permissions";
 import { Card, PageHeader, LinkButton, STATUS_META, fmtDate, fmtDateTime, Badge } from "@/components/ui";
 import type { AssetStatus } from "@prisma/client";
@@ -23,7 +25,7 @@ const daysFrom = (d: Date | null) => (d ? Math.round((d.getTime() - Date.now()) 
 
 export default async function Dashboard() {
   const ctx = await requireCtx();
-  const [d, kbDue] = await Promise.all([dashboardData(ctx), reviewDueCount(ctx)]);
+  const [d, kbDue, due, over] = await Promise.all([dashboardData(ctx), reviewDueCount(ctx), renewals(ctx, 60), overAllocated(ctx)]);
   const writable = can(ctx.user.role, "assets", "write");
   const statuses = Object.keys(STATUS_META) as AssetStatus[];
   const max = Math.max(1, ...statuses.map((s) => d.byStatus[s] ?? 0));
@@ -114,6 +116,37 @@ export default async function Dashboard() {
           )}
         </Card>
       </div>
+
+      {(due.length > 0 || over.length > 0) && (
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          {due.length > 0 && (
+            <Card title="Renewals in the next 60 days" actions={<Link className="text-xs text-brand hover:underline" href="/vendors?tab=renewals">All renewals</Link>}>
+              <ul className="divide-y divide-line text-sm">
+                {due.slice(0, 8).map((r) => (
+                  <li key={r.kind + r.id} className="flex items-center justify-between gap-2 py-1.5">
+                    <Link href={r.href} className="min-w-0 truncate hover:underline">
+                      {r.title} <span className="text-xs text-muted">{r.what.toLowerCase()}</span>
+                    </Link>
+                    <Badge tone={r.daysLeft < 0 ? "red" : r.daysLeft <= 14 ? "amber" : "gray"}>{r.daysLeft < 0 ? `${-r.daysLeft}d ago` : fmtDate(r.due)}</Badge>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+          {over.length > 0 && (
+            <Card title="Over-allocated licences" actions={<Link className="text-xs text-brand hover:underline" href="/software?issues=1">Compliance</Link>}>
+              <ul className="divide-y divide-line text-sm">
+                {over.slice(0, 8).map((l) => (
+                  <li key={l.id} className="flex items-center justify-between gap-2 py-1.5">
+                    <Link href={`/software/licenses/${l.id}`} className="min-w-0 truncate hover:underline">{l.title}</Link>
+                    <Badge tone="red">+{l.over} seats</Badge>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+        </div>
+      )}
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Card title="Recent movements" actions={<Link className="text-xs text-brand hover:underline" href="/movements">Full log</Link>}>

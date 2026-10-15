@@ -87,9 +87,9 @@ export default async function KbPage({ searchParams }: { searchParams: Promise<S
         </aside>
 
         <div className="min-w-0 space-y-3">
-          <form className="flex flex-wrap gap-2">
+          <form className="grid gap-2 sm:grid-cols-[minmax(0,22rem)_auto_auto] sm:justify-start">
             {Object.entries(sp).filter(([k, v]) => v && k !== "q" && k !== "page").map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
-            <Input name="q" defaultValue={sp.q} placeholder="Search titles, text and tags…" className="w-72" aria-label="Search the knowledge base" />
+            <Input name="q" defaultValue={sp.q} placeholder="Search titles, text and tags…" aria-label="Search the knowledge base" />
             <Button variant="secondary">Search</Button>
             {filtered && <LinkButton href="/kb" variant="ghost">Clear</LinkButton>}
           </form>

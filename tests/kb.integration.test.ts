@@ -15,11 +15,11 @@ import {
   removeAttachment,
   restoreVersion,
   reviewDueCount,
-  safeFileName,
   saveCategory,
   updateArticle,
 } from "@/server/modules/kb";
 import { globalSearch } from "@/server/modules/search";
+import { safeFileName } from "@/server/lib/storage";
 import { AppError, FieldError, ForbiddenError, NotFoundError } from "@/server/lib/errors";
 
 const run = Date.now().toString(36);

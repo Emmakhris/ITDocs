@@ -79,4 +79,5 @@ export const aad = {
   secret: (credentialId: string) => `cred:${credentialId}:secret`,
   totp: (credentialId: string) => `cred:${credentialId}:totp`,
   history: (credentialId: string) => `cred:${credentialId}:history`,
+  license: (licenseId: string) => `license:${licenseId}:key`,
 };

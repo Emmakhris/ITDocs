@@ -1,6 +1,8 @@
 /* Seed: break-glass admin, AD group mappings, asset types, and (if empty) demo data incl. network. Safe to re-run. */
 import { PrismaClient, type LocationType, type AssetStatus } from "@prisma/client";
+import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
+import { aad, encrypt, vaultConfigured } from "../src/server/crypto/vault";
 
 const db = new PrismaClient();
 
@@ -411,9 +413,67 @@ Labels feed crooked, or the status light flashes **red**.
   console.log("Seeded knowledge base: 4 categories, 4 templates, 4 articles.");
 }
 
+/** Vendors, contracts, software and licences — only when no vendors exist yet. */
+async function seedVendors() {
+  if (await db.vendor.count()) return;
+  const DAY = 86_400_000;
+  const at = (days: number) => new Date(Date.now() + days * DAY);
+  const vendor = (name: string, extra: Record<string, string> = {}) => db.vendor.create({ data: { name, ...extra } });
+  const dell = await vendor("Dell Technologies", { website: "https://www.dell.com", supportPhone: "+1 800 456 3355", supportUrl: "https://www.dell.com/support", accountNumber: "DL-448201" });
+  const cisco = await vendor("Cisco", { website: "https://www.cisco.com", supportPhone: "+1 800 553 2447", supportUrl: "https://mycase.cloudapps.cisco.com" });
+  const bd = await vendor("BD (Becton Dickinson)", { supportPhone: "+1 888 812 3266", supportEmail: "support@example.org", accountNumber: "BD-77310" });
+  const microsoft = await vendor("Microsoft", { website: "https://www.microsoft.com", supportUrl: "https://admin.microsoft.com" });
+  const zebra = await vendor("Zebra Technologies", { supportPhone: "+1 800 653 5350", supportUrl: "https://www.zebra.com/support" });
+  await db.vendorContact.createMany({
+    data: [
+      { vendorId: dell.id, name: "Alex Rivera", role: "Account manager", email: "alex.rivera@example.org", phone: "+1 555 0101" },
+      { vendorId: cisco.id, name: "Priya Shah", role: "Partner engineer", email: "priya.shah@example.org" },
+      { vendorId: bd.id, name: "Biomed field service", role: "Field service desk", phone: "+1 555 0177", notes: "Quote the account number" },
+    ],
+  });
+
+  const contract = (data: Parameters<typeof db.contract.create>[0]["data"]) => db.contract.create({ data });
+  const prosupport = await contract({ vendorId: dell.id, title: "ProSupport Plus — servers", type: "SUPPORT", reference: "PSP-2025-1182", startDate: at(-250), endDate: at(115), noticeDays: 90, autoRenew: true, annualCost: 18400, sla: "4h mission-critical onsite, 24×7" });
+  await contract({ vendorId: cisco.id, title: "Smart Net Total Care — access switches", type: "MAINTENANCE", reference: "SNTC-90331", startDate: at(-320), endDate: at(45), noticeDays: 30, annualCost: 9600, sla: "Next-business-day parts" });
+  const pumps = await contract({ vendorId: bd.id, title: "Alaris pump service agreement", type: "SERVICE", reference: "BD-SA-5521", startDate: at(-100), endDate: at(630), noticeDays: 120, annualCost: 32000, sla: "Annual PM + repairs, 5 working days" });
+  await contract({ vendorId: zebra.id, title: "Label printer OneCare", type: "SUPPORT", startDate: at(-400), endDate: at(-12), annualCost: 1200 });
+  const m365 = await contract({ vendorId: microsoft.id, title: "Enterprise Agreement", type: "SUBSCRIPTION", reference: "EA-6610042", startDate: at(-700), endDate: at(395), noticeDays: 60, autoRenew: false, annualCost: 214000 });
+
+  const cover = async (contractId: string, typeName: string) => {
+    const assets = await db.asset.findMany({ where: { type: { name: typeName }, deletedAt: null }, select: { id: true } });
+    for (const a of assets) await db.entityLink.create({ data: { fromType: "Contract", fromId: contractId, toType: "Asset", toId: a.id, kind: "covers" } });
+  };
+  await cover(prosupport.id, "Server");
+  await cover(pumps.id, "Infusion Pump");
+
+  const software = (name: string, vendorId: string, category: string) => db.software.create({ data: { name, vendorId, category } });
+  const office = await software("Microsoft 365 E3", microsoft.id, "Productivity");
+  const defender = await software("Microsoft Defender for Endpoint", microsoft.id, "Security");
+  const labels = await software("Zebra Designer Pro", zebra.id, "Utilities");
+  const key = (id: string, k: string) => (vaultConfigured() ? encrypt(k, aad.license(id)) : null);
+  const license = async (data: Omit<Parameters<typeof db.license.create>[0]["data"], "id">, plainKey?: string) => {
+    const id = crypto.randomUUID();
+    return db.license.create({ data: { ...data, id, keyEnc: plainKey ? key(id, plainKey) : null } as Parameters<typeof db.license.create>[0]["data"] });
+  };
+  const e3 = await license({ softwareId: office.id, name: "EA 2025–2027", model: "SUBSCRIPTION", seatBasis: "USER", seats: 8, vendorId: microsoft.id, contractId: m365.id, expiresAt: m365.endDate, poNumber: "PO-24-0912" });
+  const mde = await license({ softwareId: defender.id, name: "EA add-on", model: "SUBSCRIPTION", seatBasis: "DEVICE", seats: 30, vendorId: microsoft.id, contractId: m365.id, expiresAt: m365.endDate });
+  const zd = await license({ softwareId: labels.id, name: "Perpetual — 3 seats", model: "PERPETUAL", seatBasis: "DEVICE", seats: 3, vendorId: zebra.id, purchaseDate: at(-900), cost: 1350 }, "ZD-PRO-4F7Q-91KD-22XM");
+
+  const people = await db.person.findMany({ where: { deletedAt: null }, select: { id: true }, take: 8 });
+  for (const p of people) await db.licenseAssignment.create({ data: { licenseId: e3.id, personId: p.id, assignedBy: "seed" } });
+  const devices = await db.asset.findMany({ where: { deletedAt: null, type: { name: { in: ["Laptop", "Desktop", "Workstation on Wheels", "Server"] } } }, select: { id: true } });
+  for (const d of devices) await db.licenseAssignment.create({ data: { licenseId: mde.id, assetId: d.id, assignedBy: "seed" } });
+  // One seat too many on the label software, so the over-allocation warning has something to show
+  const pcs = await db.asset.findMany({ where: { deletedAt: null, type: { name: "Desktop" } }, select: { id: true }, take: 4 });
+  for (const d of pcs) await db.licenseAssignment.create({ data: { licenseId: zd.id, assetId: d.id, assignedBy: "seed" } });
+
+  console.log("Seeded vendors & software: 5 vendors, 5 contracts, 3 software titles, 3 licences.");
+}
+
 main()
   .then(seedNetwork)
   .then(seedKb)
+  .then(seedVendors)
   .catch((e) => {
     console.error(e);
     process.exit(1);

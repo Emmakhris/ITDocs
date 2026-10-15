@@ -6,6 +6,8 @@ import { getPerson, listDepartments } from "@/server/modules/people";
 import { NotFoundError } from "@/server/lib/errors";
 import { Badge, Card, DL, LinkButton, PageHeader, StatusBadge, Table, fmtDate } from "@/components/ui";
 import { PersonForm } from "../person-form";
+import { SeatsCard } from "@/components/seats-card";
+import { seatsFor } from "@/server/modules/software";
 import { savePersonAction } from "../actions";
 
 export default async function PersonDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ edit?: string }> }) {
@@ -81,6 +83,7 @@ export default async function PersonDetail({ params, searchParams }: { params: P
             )}
           </Card>
         </div>
+        <div className="space-y-4">
         <Card title="Contact">
           <DL
             items={[
@@ -91,6 +94,8 @@ export default async function PersonDetail({ params, searchParams }: { params: P
             ]}
           />
         </Card>
+        {can(ctx.user.role, "software", "read") && <SeatsCard seats={await seatsFor(ctx, { personId: id })} emptyText="No software licences assigned." />}
+        </div>
       </div>
     </>
   );

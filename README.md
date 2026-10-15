@@ -1,6 +1,6 @@
 # ITDocs — IT Documentation Management System
 
-Self-hosted web app for documenting IT: assets and **where they have moved**, locations, people, credentials, network, a knowledge base, and (in later phases) software & licences, vendors & contracts, changes & incidents. It is built for hospitals but works for any industry; medical-device features can be switched off.
+Self-hosted web app for documenting IT: assets and **where they have moved**, locations, people, credentials, network, a knowledge base, software & licences, vendors & contracts, and (in later phases) changes & incidents. It is built for hospitals but works for any industry; medical-device features can be switched off.
 
 ## Status
 
@@ -11,7 +11,7 @@ Self-hosted web app for documenting IT: assets and **where they have moved**, lo
 | 3 | Password vault: AES-256-GCM, folder access control, audited reveal/copy, TOTP codes, password history, rotation reminders, links to assets | ✅ done |
 | 4 | Network: IPAM with visual IP grid, VLANs, racks with U-layout, switch-port / patch-panel / wall-jack mapping, Wi-Fi linked to the vault | ✅ done |
 | 5 | Knowledge base: Markdown SOPs and runbooks, full version history with diff and restore, templates, tags, categories, review reminders, attachments, links to assets and locations | ✅ done |
-| 6 | Software & licences, vendors & contracts | planned |
+| 6 | Software & licences (encrypted keys, seat assignment, over-allocation and reclaim warnings), vendors & contracts (support contacts, notice-period reminders, covered assets, documents), renewals view | ✅ done |
 | 7 | Changes, incidents, daily journal | planned |
 | 8 | Diagrams, relationship map, reports, email/Teams alerts | planned |
 | 9 | REST API + tokens, AD/Intune/SCCM sync | planned |
@@ -66,6 +66,15 @@ npm run vault:rotate                   # re-encrypts everything; safe to re-run
 - **Review reminders.** Set "review every N days" on an article. Overdue articles are flagged in the knowledge base and on the dashboard. "Mark as reviewed" records the review in the audit log and schedules the next one.
 - **Links and files.** Link articles to assets and locations; they appear in a *Documentation* panel on those pages. Attachments (up to 10 MB) are stored in `UPLOAD_DIR`, not in the database, so back that folder up too. Files are always downloaded, never opened in the browser.
 - Global search covers article titles, text and tags.
+
+## Software, vendors & contracts (phase 6)
+
+- **Vendors** record support phone, email and portal, your account number, and named contacts. Keep portal logins in the password vault and link them to the contract. As elsewhere, the link is shown only to people who can open that vault folder.
+- **Contracts** (support, maintenance, extended warranty, lease, subscription, service) record start and end dates, a **notice period**, auto-renewal, annual cost, SLA, the assets they cover, and attached documents. The key date is usually the **notice deadline** (end date minus notice period): miss it and an auto-renewing contract renews for another term. Contracts are flagged *Notice due soon* within 60 days of that deadline and *Notice period passed* once it's gone.
+- **Renewals** (Vendors › Renewals, and a dashboard card) lists notice deadlines, contract ends and licence expiries for the next 30–180 days, plus anything that lapsed in the last 30.
+- **Software licences** are per user, per device, concurrent, or site (unlimited). **Licence keys are encrypted** with the vault master key: only technicians and admins can reveal them, every reveal is audited, and `npm run vault:rotate` re-encrypts them along with vault secrets.
+- **Seats** are assigned to a device or a person. Assigning past the seat count is allowed, because installs often come before paperwork, but the licence is flagged **over-allocated** on the licence, the software list ("compliance issues") and the dashboard. Seats held by retired, disposed or lost devices, or by people who have left, are highlighted as ones you can probably reclaim.
+- Asset pages show the contracts covering the device (with the vendor's support number) and its licences. Person pages show their licences.
 
 ## Production install (Docker, Linux)
 

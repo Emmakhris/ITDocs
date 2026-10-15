@@ -1,5 +1,5 @@
 /**
- * Re-encrypt every vault secret with the current VAULT_MASTER_KEY.
+ * Re-encrypt every vault secret and software licence key with the current VAULT_MASTER_KEY.
  *
  * Rotation procedure:
  *   1. Generate a new key:  node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
@@ -20,6 +20,7 @@ async function main() {
   console.log(`Current key id: ${cur}${dryRun ? " (dry run)" : ""}`);
   let creds = 0;
   let hist = 0;
+  let keys = 0;
 
   for (const c of await db.credential.findMany({ select: { id: true, secretEnc: true, totpEnc: true } })) {
     const stale = keyIdOf(c.secretEnc) !== cur || (c.totpEnc && keyIdOf(c.totpEnc) !== cur);
@@ -37,22 +38,30 @@ async function main() {
     if (!dryRun) await db.credentialHistory.update({ where: { id: h.id }, data: { secretEnc } });
     hist++;
   }
+  for (const l of await db.license.findMany({ where: { keyEnc: { not: null } }, select: { id: true, keyEnc: true } })) {
+    if (keyIdOf(l.keyEnc!) === cur) continue;
+    const keyEnc = encrypt(decrypt(l.keyEnc!, aad.license(l.id)), aad.license(l.id));
+    if (!dryRun) await db.license.update({ where: { id: l.id }, data: { keyEnc } });
+    keys++;
+  }
 
-  if (!dryRun && (creds || hist)) {
+  if (!dryRun && (creds || hist || keys)) {
     await db.auditLog.create({
       data: {
         actorName: "system",
         action: "key_rotation",
         entityType: "Vault",
-        summary: `Re-encrypted ${creds} credential(s) and ${hist} history entr(ies) with key ${cur}`,
+        summary: `Re-encrypted ${creds} credential(s), ${hist} history entr(ies) and ${keys} licence key(s) with key ${cur}`,
       },
     });
   }
   const remaining =
     (await db.credential.findMany({ select: { secretEnc: true, totpEnc: true } })).filter(
       (c) => keyIdOf(c.secretEnc) !== cur || (c.totpEnc && keyIdOf(c.totpEnc) !== cur),
-    ).length + (await db.credentialHistory.findMany({ select: { secretEnc: true } })).filter((h) => keyIdOf(h.secretEnc) !== cur).length;
-  console.log(`${dryRun ? "Would re-encrypt" : "Re-encrypted"}: ${creds} credential(s), ${hist} history entr(ies). Remaining on old keys: ${dryRun ? "n/a" : remaining}.`);
+    ).length +
+    (await db.credentialHistory.findMany({ select: { secretEnc: true } })).filter((h) => keyIdOf(h.secretEnc) !== cur).length +
+    (await db.license.findMany({ where: { keyEnc: { not: null } }, select: { keyEnc: true } })).filter((l) => keyIdOf(l.keyEnc!) !== cur).length;
+  console.log(`${dryRun ? "Would re-encrypt" : "Re-encrypted"}: ${creds} credential(s), ${hist} history entr(ies), ${keys} licence key(s). Remaining on old keys: ${dryRun ? "n/a" : remaining}.`);
 }
 
 main()
