@@ -1,0 +1,54 @@
+# Test directory for development. All passwords: Passw0rd!
+dn: ou=people,dc=example,dc=local
+objectClass: organizationalUnit
+ou: people
+
+dn: ou=groups,dc=example,dc=local
+objectClass: organizationalUnit
+ou: groups
+
+dn: uid=jtech,ou=people,dc=example,dc=local
+objectClass: inetOrgPerson
+uid: jtech
+cn: Jordan Tech
+sn: Tech
+mail: jtech@example.local
+userPassword: Passw0rd!
+
+dn: uid=aadmin,ou=people,dc=example,dc=local
+objectClass: inetOrgPerson
+uid: aadmin
+cn: Alex Admin
+sn: Admin
+mail: aadmin@example.local
+userPassword: Passw0rd!
+
+dn: uid=rviewer,ou=people,dc=example,dc=local
+objectClass: inetOrgPerson
+uid: rviewer
+cn: Riley Viewer
+sn: Viewer
+mail: rviewer@example.local
+userPassword: Passw0rd!
+
+dn: uid=nogroup,ou=people,dc=example,dc=local
+objectClass: inetOrgPerson
+uid: nogroup
+cn: No Group
+sn: Group
+userPassword: Passw0rd!
+
+dn: cn=IT-Admins,ou=groups,dc=example,dc=local
+objectClass: groupOfNames
+cn: IT-Admins
+member: uid=aadmin,ou=people,dc=example,dc=local
+
+dn: cn=IT-Technicians,ou=groups,dc=example,dc=local
+objectClass: groupOfNames
+cn: IT-Technicians
+member: uid=jtech,ou=people,dc=example,dc=local
+
+dn: cn=IT-ReadOnly,ou=groups,dc=example,dc=local
+objectClass: groupOfNames
+cn: IT-ReadOnly
+member: uid=rviewer,ou=people,dc=example,dc=local

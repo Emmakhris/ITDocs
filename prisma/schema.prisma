@@ -1,0 +1,374 @@
+// ITDocs — IT Documentation Management System
+// Phase 1 (foundation) + Phase 2 (locations, assets, movement)
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearchPostgres", "postgresqlExtensions"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pg_trgm]
+}
+
+// ─────────────────────────── Identity & access ───────────────────────────
+
+enum Role {
+  ADMIN
+  TECHNICIAN
+  READONLY
+  AUDITOR
+}
+
+enum AuthSource {
+  LOCAL
+  LDAP
+}
+
+model User {
+  id          String     @id @default(cuid())
+  username    String     @unique
+  displayName String
+  email       String?
+  role        Role       @default(READONLY)
+  source      AuthSource @default(LDAP)
+  // Local (break-glass) accounts only
+  passwordHash String?
+  totpSecret   String?
+  totpEnabled  Boolean   @default(false)
+  active       Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  sessions  Session[]
+  auditLogs AuditLog[]
+  movements AssetMovement[] @relation("MovedBy")
+  checkoutsHandled Checkout[] @relation("CheckedOutBy")
+}
+
+model Session {
+  id         String   @id // sha256 of the cookie token
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  expiresAt  DateTime
+  ip         String?
+  userAgent  String?
+
+  @@index([userId])
+}
+
+/// Maps an AD/LDAP group DN (or CN) to an application role.
+model LdapGroupMapping {
+  id        String @id @default(cuid())
+  groupName String @unique
+  role      Role
+  priority  Int    @default(0) // highest wins when a user is in multiple groups
+}
+
+// ───────────────────────────── Audit trail ─────────────────────────────
+// Append-only: a trigger (see migration) rejects UPDATE and DELETE.
+
+model AuditLog {
+  id         BigInt   @id @default(autoincrement())
+  at         DateTime @default(now())
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id])
+  actorName  String // denormalised so history survives user changes
+  action     String // e.g. create, update, delete, move, checkout, login, login_failed, view_sensitive, export
+  entityType String
+  entityId   String?
+  summary    String?
+  before     Json?
+  after      Json?
+  ip         String?
+  userAgent  String?
+
+  @@index([entityType, entityId])
+  @@index([at])
+  @@index([actorId])
+}
+
+// ───────────────────────────── Settings ─────────────────────────────
+
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+// ───────────────────────────── People ─────────────────────────────
+
+model Department {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  costCenter String?
+  people    Person[]
+  assets    Asset[]
+  deletedAt DateTime?
+}
+
+/// People that assets can be assigned to (staff, not necessarily app users). Synced from AD or manual.
+model Person {
+  id           String      @id @default(cuid())
+  name         String
+  email        String?
+  employeeId   String?     @unique
+  phone        String?
+  title        String?
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+  adGuid       String?     @unique
+  active       Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  deletedAt    DateTime?
+
+  assets    Asset[]
+  checkouts Checkout[]
+
+  @@index([name])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Person_name_trgm")
+}
+
+// ───────────────────────────── Locations ─────────────────────────────
+
+enum LocationType {
+  SITE
+  BUILDING
+  FLOOR
+  ROOM
+  AREA
+  RACK
+  STORAGE
+}
+
+model Location {
+  id        String       @id @default(cuid())
+  name      String
+  type      LocationType
+  code      String?      @unique
+  parentId  String?
+  parent    Location?    @relation("LocationTree", fields: [parentId], references: [id])
+  children  Location[]   @relation("LocationTree")
+  address   String?
+  notes     String?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  deletedAt DateTime?
+
+  assets        Asset[]
+  movementsFrom AssetMovement[] @relation("FromLocation")
+  movementsTo   AssetMovement[] @relation("ToLocation")
+
+  @@index([parentId])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Location_name_trgm")
+}
+
+// ───────────────────────────── Assets ─────────────────────────────
+
+enum AssetStatus {
+  ORDERED
+  IN_STOCK
+  DEPLOYED
+  IN_REPAIR
+  LOANED
+  RETIRED
+  DISPOSED
+  LOST
+}
+
+/// Admin-defined asset types with custom field definitions (JSON array of FieldDef).
+model AssetType {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  icon        String?
+  isMedical   Boolean   @default(false) // shows medical-device fields when module enabled
+  fieldDefs   Json      @default("[]")
+  tagPrefix   String?
+  createdAt   DateTime  @default(now())
+  deletedAt   DateTime?
+  assets      Asset[]
+}
+
+model Asset {
+  id           String       @id @default(cuid())
+  tag          String       @unique // asset tag printed on QR label
+  name         String
+  typeId       String
+  type         AssetType    @relation(fields: [typeId], references: [id])
+  status       AssetStatus  @default(IN_STOCK)
+  manufacturer String?
+  model        String?
+  serial       String?
+  hostname     String?
+  ipAddress    String?
+  macAddress   String?
+  os           String?
+
+  locationId   String?
+  location     Location?    @relation(fields: [locationId], references: [id])
+  assigneeId   String?
+  assignee     Person?      @relation(fields: [assigneeId], references: [id])
+  departmentId String?
+  department   Department?  @relation(fields: [departmentId], references: [id])
+
+  vendorName    String?
+  purchaseDate  DateTime?
+  purchaseCost  Decimal?    @db.Decimal(12, 2)
+  poNumber      String?
+  warrantyEnd   DateTime?
+  eolDate       DateTime?
+
+  // Medical device extension (shown when module enabled and type.isMedical)
+  udi            String?
+  riskClass      String?
+  biomedOwner    String?
+  pmIntervalDays Int?
+  lastPmDate     DateTime?
+  nextPmDate     DateTime?
+  storesPhi      Boolean    @default(false)
+  networkSegmented Boolean  @default(false)
+
+  customFields Json         @default("{}")
+  notes        String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  deletedAt    DateTime?
+
+  movements AssetMovement[]
+  checkouts Checkout[]
+  disposal  Disposal?
+
+  @@index([status])
+  @@index([locationId])
+  @@index([assigneeId])
+  @@index([typeId])
+  @@index([serial])
+  @@index([hostname])
+  @@index([warrantyEnd])
+  @@index([nextPmDate])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Asset_name_trgm")
+  @@index([tag(ops: raw("gin_trgm_ops"))], type: Gin, map: "Asset_tag_trgm")
+  @@index([serial(ops: raw("gin_trgm_ops"))], type: Gin, map: "Asset_serial_trgm")
+  @@index([hostname(ops: raw("gin_trgm_ops"))], type: Gin, map: "Asset_hostname_trgm")
+  @@index([customFields(ops: JsonbPathOps)], type: Gin, map: "Asset_customFields_gin")
+}
+
+enum MoveMethod {
+  CREATE
+  MANUAL
+  SCAN
+  CHECKOUT
+  CHECKIN
+  IMPORT
+  BULK
+  DISPOSAL
+}
+
+/// Immutable history of every location / assignee / status change of an asset.
+model AssetMovement {
+  id              String       @id @default(cuid())
+  assetId         String
+  asset           Asset        @relation(fields: [assetId], references: [id])
+  movedAt         DateTime     @default(now())
+  movedById       String?
+  movedBy         User?        @relation("MovedBy", fields: [movedById], references: [id])
+  movedByName     String
+  method          MoveMethod
+  fromLocationId  String?
+  fromLocation    Location?    @relation("FromLocation", fields: [fromLocationId], references: [id])
+  toLocationId    String?
+  toLocation      Location?    @relation("ToLocation", fields: [toLocationId], references: [id])
+  fromLocationPath String?     // snapshot of full path, survives renames
+  toLocationPath   String?
+  fromAssignee    String?      // snapshot names
+  toAssignee      String?
+  fromStatus      AssetStatus?
+  toStatus        AssetStatus?
+  reason          String?
+  ticketRef       String?
+
+  @@index([assetId, movedAt])
+  @@index([toLocationId])
+  @@index([movedAt])
+}
+
+model Checkout {
+  id           String    @id @default(cuid())
+  assetId      String
+  asset        Asset     @relation(fields: [assetId], references: [id])
+  personId     String
+  person       Person    @relation(fields: [personId], references: [id])
+  checkedOutById String
+  checkedOutBy User      @relation("CheckedOutBy", fields: [checkedOutById], references: [id])
+  outAt        DateTime  @default(now())
+  dueAt        DateTime?
+  returnedAt   DateTime?
+  outCondition String?
+  inCondition  String?
+  notes        String?
+
+  @@index([assetId])
+  @@index([returnedAt, dueAt])
+}
+
+model Disposal {
+  id            String   @id @default(cuid())
+  assetId       String   @unique
+  asset         Asset    @relation(fields: [assetId], references: [id])
+  disposedAt    DateTime
+  method        String // recycle, destroy, resale, donate, return-to-vendor
+  wipeMethod    String? // e.g. NIST 800-88 Purge, physical destruction
+  certificateRef String?
+  vendor        String?
+  witness       String?
+  notes         String?
+  recordedBy    String
+  createdAt     DateTime @default(now())
+}
+
+// ───────────────────────────── Generic links & files ─────────────────────────────
+
+model EntityLink {
+  id        String   @id @default(cuid())
+  fromType  String
+  fromId    String
+  toType    String
+  toId      String
+  kind      String   @default("related") // related, depends_on, documented_by, credential_for…
+  createdAt DateTime @default(now())
+
+  @@unique([fromType, fromId, toType, toId, kind])
+  @@index([toType, toId])
+}
+
+model Attachment {
+  id         String   @id @default(cuid())
+  entityType String
+  entityId   String
+  fileName   String
+  mimeType   String
+  size       Int
+  storageKey String   @unique
+  uploadedBy String
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String?   // null = everyone with access
+  kind      String
+  title     String
+  body      String?
+  link      String?
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
+  dedupeKey String?   @unique
+
+  @@index([userId, readAt])
+}

@@ -1,0 +1,29 @@
+# Development services: PostgreSQL + an OpenLDAP server that simulates Active Directory.
+# Usage: docker compose -f docker-compose.dev.yml up -d   then   npm run dev
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: itdocs
+      POSTGRES_PASSWORD: itdocs
+      POSTGRES_DB: itdocs
+    ports: ["5433:5432"]
+    volumes: [itdocs-dev-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U itdocs"]
+      interval: 5s
+      retries: 10
+
+  ldap:
+    image: osixia/openldap:1.5.0
+    command: --copy-service
+    environment:
+      LDAP_ORGANISATION: "Example Hospital"
+      LDAP_DOMAIN: "example.local"
+      LDAP_ADMIN_PASSWORD: "admin"
+    ports: ["3389:389"]
+    volumes:
+      - ./docker/ldap/seed.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/50-seed.ldif:ro
+
+volumes:
+  itdocs-dev-db:

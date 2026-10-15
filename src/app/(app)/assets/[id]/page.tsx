@@ -1,0 +1,260 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { requireCtx } from "@/server/auth/session";
+import { can } from "@/server/rbac/permissions";
+import { assetAt, assetMovements, getAsset } from "@/server/modules/assets";
+import { entityHistory } from "@/server/modules/audit-query";
+import { locationTree } from "@/server/modules/locations";
+import { getSettings } from "@/server/modules/settings";
+import { NotFoundError } from "@/server/lib/errors";
+import { db } from "@/server/db";
+import { Badge, Card, DL, LinkButton, PageHeader, StatusBadge, fmtDate, fmtDateTime, Input, Button } from "@/components/ui";
+import { MovementTimeline } from "@/components/movement-timeline";
+import { ConfirmSubmit } from "@/components/form";
+import { AssetActionPanels } from "./panels";
+import { deleteAssetAction } from "../actions";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  const a = await db.asset.findUnique({ where: { id: (await params).id }, select: { tag: true } });
+  return { title: a?.tag ?? "Asset" };
+}
+
+export default async function AssetDetail({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ at?: string; action?: string }>;
+}) {
+  const ctx = await requireCtx();
+  const { id } = await params;
+  const sp = await searchParams;
+  const a = await getAsset(ctx, id).catch((e) => {
+    if (e instanceof NotFoundError) notFound();
+    throw e;
+  });
+  const [movements, history, locations, settings] = await Promise.all([
+    assetMovements(ctx, a.id),
+    entityHistory("Asset", a.id),
+    locationTree(),
+    getSettings(),
+  ]);
+  const atDate = sp.at ? new Date(sp.at) : null;
+  const atResult = atDate && !Number.isNaN(atDate.getTime()) ? await assetAt(ctx, a.id, atDate) : null;
+  const writable = can(ctx.user.role, "assets", "write");
+  const openCheckout = a.checkouts.find((c) => !c.returnedAt);
+  const cf = a.customFields as Record<string, unknown>;
+  const disposed = a.status === "DISPOSED";
+  const days = (d: Date | null) => (d ? Math.round((d.getTime() - Date.now()) / 86_400_000) : null);
+  const w = days(a.warrantyEnd);
+
+  return (
+    <>
+      <PageHeader
+        crumbs={[{ href: "/assets", label: "Assets" }]}
+        title={
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="font-mono">{a.tag}</span>
+            <span className="font-normal text-muted">·</span>
+            {a.name}
+          </span>
+        }
+        subtitle={
+          <span className="flex flex-wrap items-center gap-2">
+            <StatusBadge status={a.status} />
+            <span>{a.type.name}</span>
+            {a.storesPhi && <Badge tone="red">PHI</Badge>}
+            {openCheckout && <Badge tone="amber">On loan to {openCheckout.person.name}</Badge>}
+          </span>
+        }
+        actions={
+          <>
+            <LinkButton href={`/assets/labels?ids=${a.id}`}>Print label</LinkButton>
+            {writable && !disposed && <LinkButton href={`/assets/${a.id}/edit`} variant="primary">Edit</LinkButton>}
+          </>
+        }
+      />
+
+      {writable && (
+        <div className="mb-4">
+          <AssetActionPanels
+            assetId={a.id}
+            locations={locations.map((l) => ({ id: l.id, name: l.name, path: l.path, depth: l.depth }))}
+            checkedOut={!!openCheckout}
+            disposed={disposed}
+            storesPhi={a.storesPhi}
+            initialTab={sp.action as "move" | undefined}
+          />
+        </div>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="space-y-4 lg:col-span-2">
+          <Card title="Current placement">
+            <DL
+              items={[
+                ["Location", a.location ? <Link className="text-brand hover:underline" href={`/locations/${a.location.id}`}>{a.locationPath}</Link> : null],
+                ["Assigned to", a.assignee ? <Link className="text-brand hover:underline" href={`/people/${a.assignee.id}`}>{a.assignee.name}</Link> : null],
+                ["Department", a.department?.name],
+                ["Last movement", movements[0] ? `${fmtDateTime(movements[0].movedAt)} by ${movements[0].movedByName}` : null],
+              ]}
+            />
+          </Card>
+
+          <Card title="Details">
+            <DL
+              items={[
+                ["Manufacturer", a.manufacturer],
+                ["Model", a.model],
+                ["Serial number", a.serial && <span className="font-mono">{a.serial}</span>],
+                ["Hostname", a.hostname && <span className="font-mono">{a.hostname}</span>],
+                ["IP address", a.ipAddress && <span className="font-mono">{a.ipAddress}</span>],
+                ["MAC address", a.macAddress && <span className="font-mono">{a.macAddress}</span>],
+                ["Operating system", a.os],
+                ...a.fieldDefs.map((d): [string, React.ReactNode] => {
+                  const v = cf[d.key];
+                  return [
+                    d.label,
+                    d.kind === "boolean" ? (v ? "Yes" : "No") : d.kind === "url" && v ? <a className="text-brand hover:underline" href={String(v)} target="_blank" rel="noreferrer">{String(v)}</a> : v === undefined || v === null ? null : String(v),
+                  ];
+                }),
+              ]}
+            />
+          </Card>
+
+          {settings.medicalModule && a.type.isMedical && (
+            <Card title="Medical device">
+              <DL
+                items={[
+                  ["UDI / device ID", a.udi],
+                  ["Risk class", a.riskClass],
+                  ["Biomed owner", a.biomedOwner],
+                  ["PM interval", a.pmIntervalDays ? `${a.pmIntervalDays} days` : null],
+                  ["Last PM", fmtDate(a.lastPmDate)],
+                  [
+                    "Next PM",
+                    a.nextPmDate && (
+                      <span className="flex items-center gap-2">
+                        {fmtDate(a.nextPmDate)}
+                        {(days(a.nextPmDate) ?? 1) < 0 && <Badge tone="red">Overdue</Badge>}
+                      </span>
+                    ),
+                  ],
+                  ["Segmented network", a.networkSegmented ? "Yes" : "No"],
+                ]}
+              />
+            </Card>
+          )}
+
+          <Card
+            title="Movement history"
+            actions={
+              <form className="flex items-center gap-2">
+                <label htmlFor="at" className="text-xs text-muted">Where was it on</label>
+                <Input id="at" type="datetime-local" name="at" defaultValue={sp.at} className="h-8 w-52" />
+                <Button size="sm" variant="secondary">Check</Button>
+              </form>
+            }
+          >
+            {sp.at && (
+              <div className="mb-4 rounded-md bg-brand-soft px-3 py-2 text-sm">
+                {atResult ? (
+                  <>
+                    On {fmtDateTime(atDate)}: <strong>{atResult.toLocationPath ?? "no location"}</strong>
+                    {atResult.toAssignee && <> , assigned to <strong>{atResult.toAssignee}</strong></>}
+                    {atResult.toStatus && <> ({atResult.toStatus.replace("_", " ").toLowerCase()})</>}.
+                  </>
+                ) : (
+                  "No record — the asset did not exist yet at that time."
+                )}
+              </div>
+            )}
+            <MovementTimeline items={movements} />
+          </Card>
+        </div>
+
+        <div className="space-y-4">
+          <Card title="Purchase & lifecycle">
+            <DL
+              items={[
+                ["Vendor", a.vendorName],
+                ["PO number", a.poNumber],
+                ["Cost", a.purchaseCost ? Number(a.purchaseCost).toLocaleString(undefined, { minimumFractionDigits: 2 }) : null],
+                ["Purchased", fmtDate(a.purchaseDate)],
+                [
+                  "Warranty end",
+                  a.warrantyEnd && (
+                    <span className="flex items-center gap-2">
+                      {fmtDate(a.warrantyEnd)}
+                      {w !== null && w < 0 && <Badge>expired</Badge>}
+                      {w !== null && w >= 0 && w <= 90 && <Badge tone="amber">{w}d left</Badge>}
+                    </span>
+                  ),
+                ],
+                ["End of life", fmtDate(a.eolDate)],
+              ]}
+            />
+          </Card>
+
+          {a.disposal && (
+            <Card title="Disposal record">
+              <DL
+                items={[
+                  ["Date", fmtDate(a.disposal.disposedAt)],
+                  ["Method", a.disposal.method],
+                  ["Data wipe", a.disposal.wipeMethod],
+                  ["Certificate", a.disposal.certificateRef],
+                  ["Vendor", a.disposal.vendor],
+                  ["Witness", a.disposal.witness],
+                  ["Recorded by", a.disposal.recordedBy],
+                ]}
+              />
+            </Card>
+          )}
+
+          <Card title="Check-out history">
+            {a.checkouts.length ? (
+              <ul className="divide-y divide-line text-sm">
+                {a.checkouts.map((c) => (
+                  <li key={c.id} className="py-2">
+                    <p className="font-medium">{c.person.name}</p>
+                    <p className="text-xs text-muted">
+                      {fmtDate(c.outAt)} → {c.returnedAt ? fmtDate(c.returnedAt) : <span className="text-warn">not returned{c.dueAt && `, due ${fmtDate(c.dueAt)}`}</span>}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted">Never checked out.</p>
+            )}
+          </Card>
+
+          {a.notes && (
+            <Card title="Notes">
+              <p className="whitespace-pre-wrap text-sm">{a.notes}</p>
+            </Card>
+          )}
+
+          <Card title="Change history">
+            <ul className="space-y-2 text-sm">
+              {history.map((h) => (
+                <li key={String(h.id)}>
+                  <p>{h.summary}</p>
+                  <p className="text-xs text-muted">{fmtDateTime(h.at)} · {h.actorName}</p>
+                </li>
+              ))}
+            </ul>
+          </Card>
+
+          {writable && (
+            <form action={deleteAssetAction.bind(null, a.id)} className="text-right">
+              <ConfirmSubmit message="Delete this asset record? It will be hidden from lists but its history is kept in the audit log.">
+                Delete record
+              </ConfirmSubmit>
+            </form>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}

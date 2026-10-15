@@ -1,26 +1,93 @@
 @import "tailwindcss";
 
+/* Semantic color tokens — light and dark. Use bg-surface, text-fg, border-line, etc. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --bg: #f5f7fa;
+  --surface: #ffffff;
+  --surface-2: #f0f3f7;
+  --fg: #111827;
+  --muted: #5b6474;
+  --line: #e2e7ee;
+  --brand: #0e6ba8;
+  --brand-fg: #ffffff;
+  --brand-soft: #e6f1f9;
+  --danger: #c0352b;
+  --danger-soft: #fdecea;
+  --warn: #a15c00;
+  --warn-soft: #fff4e0;
+  --ok: #1e7a46;
+  --ok-soft: #e5f5ec;
+  --sidebar: #0f2233;
+  --sidebar-fg: #c9d6e2;
+  --sidebar-active: #1b3a55;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --bg: #0d1117;
+    --surface: #151b23;
+    --surface-2: #1c2430;
+    --fg: #e6edf3;
+    --muted: #9aa6b4;
+    --line: #2a3441;
+    --brand: #4aa3df;
+    --brand-fg: #06121c;
+    --brand-soft: #12304a;
+    --danger: #f2766b;
+    --danger-soft: #3a1714;
+    --warn: #f0b45a;
+    --warn-soft: #3a2a0f;
+    --ok: #5cc98c;
+    --ok-soft: #12301f;
+    --sidebar: #0a1520;
+    --sidebar-fg: #b4c3d1;
+    --sidebar-active: #18324a;
   }
 }
 
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-brand: var(--brand);
+  --color-brand-fg: var(--brand-fg);
+  --color-brand-soft: var(--brand-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-fg: var(--sidebar-fg);
+  --color-sidebar-active: var(--sidebar-active);
+  --font-sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+html {
+  color-scheme: light dark;
+}
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #fff;
+  }
 }

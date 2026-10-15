@@ -1,0 +1,5 @@
+# Replace with your internal hostname. For an internal CA use: tls internal
+itdocs.example.local {
+	tls internal
+	reverse_proxy app:3000
+}
