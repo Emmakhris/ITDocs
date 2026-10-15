@@ -10,6 +10,8 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Lets a second build (e.g. verification while another server runs) use its own folder
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   outputFileTracingRoot: process.cwd(),
   serverExternalPackages: ["ldapts"],
   experimental: { serverActions: { bodySizeLimit: "10mb" } },

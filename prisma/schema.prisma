@@ -46,6 +46,7 @@ model User {
   auditLogs AuditLog[]
   movements AssetMovement[] @relation("MovedBy")
   checkoutsHandled Checkout[] @relation("CheckedOutBy")
+  vaultGrants      VaultFolderAccess[]
 }
 
 model Session {
@@ -371,4 +372,78 @@ model Notification {
   dedupeKey String?   @unique
 
   @@index([userId, readAt])
+}
+
+// ───────────────────────────── Password vault (phase 3) ─────────────────────────────
+// Secrets are AES-256-GCM encrypted by src/server/crypto/vault.ts with a master key that never
+// touches the database. Ciphertext format: v1.<keyId>.<iv>.<tag>.<ciphertext> (base64url).
+
+enum VaultAccessLevel {
+  VIEW
+  EDIT
+}
+
+model VaultFolder {
+  id          String    @id @default(cuid())
+  name        String
+  description String?
+  /// false = every vault user (Admin/Technician) can use it; true = only admins + explicit grants
+  restricted  Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  access      VaultFolderAccess[]
+  credentials Credential[]
+}
+
+/// A grant on a restricted folder, to a whole role or to one user.
+model VaultFolderAccess {
+  id       String           @id @default(cuid())
+  folderId String
+  folder   VaultFolder      @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  role     Role?
+  userId   String?
+  user     User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  level    VaultAccessLevel @default(VIEW)
+
+  @@unique([folderId, role])
+  @@unique([folderId, userId])
+}
+
+model Credential {
+  id                String      @id // generated in code: needed before encryption (bound as AAD)
+  folderId          String
+  folder            VaultFolder @relation(fields: [folderId], references: [id])
+  title             String
+  username          String?
+  url               String?
+  notes             String?
+  secretEnc         String
+  totpEnc           String?
+  rotateEveryDays   Int?
+  rotationDueAt     DateTime?
+  passwordChangedAt DateTime    @default(now())
+  createdBy         String
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  deletedAt         DateTime?
+
+  history CredentialHistory[]
+
+  @@index([folderId])
+  @@index([rotationDueAt])
+  @@index([title])
+}
+
+/// Previous secrets (encrypted), kept so an old password can be recovered after a bad rotation.
+model CredentialHistory {
+  id           String     @id @default(cuid())
+  credentialId String
+  credential   Credential @relation(fields: [credentialId], references: [id])
+  secretEnc    String
+  replacedAt   DateTime   @default(now())
+  replacedBy   String
+
+  @@index([credentialId, replacedAt])
 }

@@ -19,6 +19,8 @@ COPY --from=build /app/.next ./.next
 COPY --from=build /app/public ./public
 COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/scripts ./scripts
+# vault crypto module is needed by scripts/vault-rotate-key.ts
+COPY --from=build /app/src/server/crypto ./src/server/crypto
 USER app
 EXPOSE 3000
 # Apply pending migrations, then start

@@ -8,7 +8,7 @@ Self-hosted web app for documenting IT: assets and **where they have moved**, lo
 |---|---|---|
 | 1 | Foundation: AD/LDAP + break-glass login with MFA, roles, immutable audit log, search, settings | ✅ done |
 | 2 | Locations, assets, custom asset types/fields, **movement log**, check-out/in, QR labels + phone scanning, disposal with wipe records, medical-device fields, CSV import/export | ✅ done |
-| 3 | Password vault (AES-256-GCM, audited reveals) | planned |
+| 3 | Password vault: AES-256-GCM, folder access control, audited reveal/copy, TOTP codes, password history, rotation reminders, links to assets | ✅ done |
 | 4 | Network: IPAM, VLANs, racks, switch ports, Wi-Fi | planned |
 | 5 | Knowledge base / SOPs with versions & templates | planned |
 | 6 | Software & licences, vendors & contracts | planned |
@@ -25,6 +25,27 @@ Self-hosted web app for documenting IT: assets and **where they have moved**, lo
 - **Custom asset types.** Admins define types (e.g. *Infusion Pump*) and their fields (text, number, date, drop-down, yes/no, URL) without code.
 - **Lifecycle.** Ordered → In stock → Deployed → In repair / Loaned → Retired → Disposed. Disposal records the method, NIST 800-88 wipe method, certificate # and witness. A wipe method is **mandatory** for PHI devices.
 - **Roles.** Administrator, Technician, Read-only, Auditor. AD groups map to roles.
+
+## Password vault (phase 3)
+
+- **Encryption.** Secrets, TOTP seeds and old passwords are encrypted with AES-256-GCM, using a random IV per value and the record id bound as additional authenticated data. The master key `VAULT_MASTER_KEY` lives only in `.env` and never in the database or its backups. Titles, usernames, URLs and notes are *not* encrypted, so they stay searchable. Don't put secrets in notes.
+- **Who can see what.** Only Administrators and Technicians can use the vault; Read-only and Auditor roles are blocked. Folders are open to every technician unless an admin marks them **restricted**. A restricted folder is visible only to admins and to the roles or users granted *view* or *edit* on it.
+- **Every reveal and copy is logged.** Each one writes a `view_sensitive` audit entry (who, when, IP, which field) before the value leaves the server. It shows on the credential's access log and under Audit log › `view_sensitive`. Revealed values hide again after 30 s, and copied values are cleared from the clipboard after 30 s.
+- **TOTP.** Paste a base32 seed or the `otpauth://` link from a QR code, and the vault shows the current 6-digit code. Showing the code is audited too.
+- **History and rotation.** Changing a password keeps the old one, encrypted, in its history. An optional "rotate every N days" setting flags the credential when it's due.
+- **Linked assets.** Credentials can be linked to assets. The asset page lists linked credentials that the viewer is allowed to see.
+
+### Rotating the master key
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"   # new key
+# .env: VAULT_OLD_MASTER_KEYS=<old key>   VAULT_MASTER_KEY=<new key>   then restart the app
+npm run vault:rotate -- --dry-run      # in Docker: docker compose exec app npx tsx scripts/vault-rotate-key.ts --dry-run
+npm run vault:rotate                   # re-encrypts everything; safe to re-run
+# when it reports "Remaining on old keys: 0", remove VAULT_OLD_MASTER_KEYS and restart
+```
+
+**If you lose `VAULT_MASTER_KEY`, the stored secrets cannot be recovered.** Keep a copy offline, e.g. sealed with the break-glass password.
 
 ## Production install (Docker, Linux)
 
@@ -78,7 +99,7 @@ If Docker is available, `docker compose -f docker-compose.dev.yml up -d` starts 
 
 ```bash
 DATABASE_URL=postgresql://itdocs:itdocs@localhost:5433/itdocs_test npx prisma migrate deploy   # once
-npm test                                                   # unit + integration (movement, check-out, disposal, RBAC, immutability)
+npm test                                                   # unit + integration (movement, check-out, disposal, RBAC, immutability, vault)
 DATABASE_URL=...itdocs_test npm run db:seed-large -- 50000 && PERF=1 npx vitest run tests/perf.test.ts
 ```
 
@@ -87,5 +108,6 @@ DATABASE_URL=...itdocs_test npm run db:seed-large -- 50000 && PERF=1 npx vitest 
 - Next.js 15 (App Router, server actions) + TypeScript; PostgreSQL 16 + Prisma; Tailwind CSS. System fonts only, so it builds offline / air-gapped.
 - **All writes go through `src/server/modules/*`**, which enforce RBAC and write the audit log in the same transaction. Pages and (later) the REST API call these services.
 - `src/server/modules/assets.ts › recordMovement()` is the single function that writes movement history.
+- `src/server/crypto/vault.ts` is the only code that touches vault keys; `src/server/modules/vault.ts › reveal()` is the only path that returns a decrypted secret.
 - Sessions are random tokens stored hashed in the DB, with an idle timeout (`SESSION_IDLE_MINUTES`) and a maximum lifetime. Disabling a user kills their sessions.
 - Security headers are set in `next.config.ts`. CSV exports are protected against formula injection, and LDAP filter input is escaped.

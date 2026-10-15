@@ -2,6 +2,7 @@ import "server-only";
 import { db } from "../db";
 import { can } from "../rbac/permissions";
 import type { Ctx } from "../context";
+import { accessibleFolderIds } from "./vault";
 
 export type SearchHit = { kind: string; id: string; title: string; subtitle?: string; href: string };
 
@@ -43,6 +44,22 @@ export async function globalSearch(ctx: Ctx, q: string, limit = 8): Promise<Sear
       db.person.findMany({ where: { deletedAt: null, OR: [{ name: ci }, { email: ci }, { employeeId: ci }] }, take: limit }).then((rows) => {
         for (const p of rows) hits.push({ kind: "Person", id: p.id, title: p.name, subtitle: p.email ?? undefined, href: `/people/${p.id}` });
       }),
+    );
+  }
+  if (can(ctx.user.role, "vault", "read")) {
+    // Titles / usernames only, and only from folders this user may open
+    tasks.push(
+      accessibleFolderIds(ctx).then((folderIds) =>
+        db.credential
+          .findMany({
+            where: { deletedAt: null, folderId: { in: folderIds }, OR: [{ title: ci }, { username: ci }, { url: ci }] },
+            select: { id: true, title: true, username: true },
+            take: limit,
+          })
+          .then((rows) => {
+            for (const c of rows) hits.push({ kind: "Credential", id: c.id, title: c.title, subtitle: c.username ?? undefined, href: `/vault/${c.id}` });
+          }),
+      ),
     );
   }
   await Promise.all(tasks);

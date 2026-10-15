@@ -20,6 +20,9 @@ export default defineConfig({
     fileParallelism: false,
     env: {
       DATABASE_URL: process.env.TEST_DATABASE_URL ?? "postgresql://itdocs:itdocs@localhost:5433/itdocs_test",
+      // Fixed, test-only vault key (32 bytes) — never used outside the test database
+      VAULT_MASTER_KEY: "dGVzdC1vbmx5LXZhdWx0LWtleS0zMi1ieXRlcyEhISE=",
+      VAULT_OLD_MASTER_KEYS: "",
     },
   },
 });
