@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,6 +24,8 @@ export default defineConfig({
       // Fixed, test-only vault key (32 bytes) — never used outside the test database
       VAULT_MASTER_KEY: "dGVzdC1vbmx5LXZhdWx0LWtleS0zMi1ieXRlcyEhISE=",
       VAULT_OLD_MASTER_KEYS: "",
+      // Attachment uploads from tests go to the OS temp folder, not ./data
+      UPLOAD_DIR: path.join(os.tmpdir(), "itdocs-test-uploads"),
     },
   },
 });

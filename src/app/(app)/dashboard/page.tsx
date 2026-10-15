@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireCtx } from "@/server/auth/session";
 import { dashboardData } from "@/server/modules/dashboard";
+import { reviewDueCount } from "@/server/modules/kb";
 import { can } from "@/server/rbac/permissions";
 import { Card, PageHeader, LinkButton, STATUS_META, fmtDate, fmtDateTime, Badge } from "@/components/ui";
 import type { AssetStatus } from "@prisma/client";
@@ -22,7 +23,7 @@ const daysFrom = (d: Date | null) => (d ? Math.round((d.getTime() - Date.now()) 
 
 export default async function Dashboard() {
   const ctx = await requireCtx();
-  const d = await dashboardData(ctx);
+  const [d, kbDue] = await Promise.all([dashboardData(ctx), reviewDueCount(ctx)]);
   const writable = can(ctx.user.role, "assets", "write");
   const statuses = Object.keys(STATUS_META) as AssetStatus[];
   const max = Math.max(1, ...statuses.map((s) => d.byStatus[s] ?? 0));
@@ -50,6 +51,13 @@ export default async function Dashboard() {
         <Stat label="Overdue check-outs" value={d.overdue.length} href="/checkouts?overdue=1" tone="danger" />
         <Stat label="Lost" value={d.byStatus.LOST ?? 0} href="/assets?status=LOST" tone="danger" />
       </div>
+
+      {kbDue > 0 && (
+        <p className="mt-4 rounded-md border border-warn/30 bg-warn-soft px-3 py-2 text-sm text-warn">
+          {kbDue} knowledge-base article{kbDue === 1 ? " is" : "s are"} due for review.{" "}
+          <Link href="/kb?view=review" className="font-medium underline">Review now</Link>
+        </p>
+      )}
 
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
         <Card title="Assets by status">

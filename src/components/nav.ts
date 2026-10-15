@@ -27,7 +27,7 @@ export const NAV: NavGroup[] = [
     items: [
       { href: "/vault", label: "Password vault", icon: "key-round", module: "vault" },
       { href: "/network", label: "Network", icon: "network", module: "network" },
-      { href: "/kb", label: "Knowledge base", icon: "book-open", module: "kb", phase: 5 },
+      { href: "/kb", label: "Knowledge base", icon: "book-open", module: "kb" },
       { href: "/software", label: "Software & licenses", icon: "app-window", module: "software", phase: 6 },
       { href: "/vendors", label: "Vendors & contracts", icon: "handshake", module: "vendors", phase: 6 },
       { href: "/changes", label: "Changes & incidents", icon: "git-pull-request", module: "changes", phase: 7 },

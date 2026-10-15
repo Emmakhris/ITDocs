@@ -8,6 +8,8 @@ import { NotFoundError } from "@/server/lib/errors";
 import { db } from "@/server/db";
 import { Card, DL, LinkButton, PageHeader, StatusBadge, Table, Badge } from "@/components/ui";
 import { MovementTimeline } from "@/components/movement-timeline";
+import { DocumentationCard } from "@/components/kb-links";
+import { articlesFor } from "@/server/modules/kb";
 import { LocationForm } from "../location-form";
 import { saveLocationAction, deleteLocationAction } from "../actions";
 import { DeleteLocation } from "./delete-location";
@@ -32,11 +34,12 @@ export default async function LocationDetail({ params, searchParams }: { params:
     );
   }
 
-  const [path, assets, movements, statusCounts] = await Promise.all([
+  const [path, assets, movements, statusCounts, articles] = await Promise.all([
     locationPath(db, id),
     listAssets(ctx, { locationId: id, pageSize: 25 }),
     recentMovements(ctx, { locationId: id, take: 15 }),
     db.asset.groupBy({ by: ["status"], where: { locationId: id, deletedAt: null }, _count: true }),
+    articlesFor(ctx, "Location", id),
   ]);
 
   return (
@@ -97,6 +100,7 @@ export default async function LocationDetail({ params, searchParams }: { params:
             />
             {loc.notes && <p className="mt-3 whitespace-pre-wrap text-sm">{loc.notes}</p>}
           </Card>
+          {can(ctx.user.role, "kb", "read") && <DocumentationCard articles={articles} canWrite={can(ctx.user.role, "kb", "write")} />}
           <Card title="Sub-locations">
             {loc.children.length ? (
               <ul className="space-y-1 text-sm">

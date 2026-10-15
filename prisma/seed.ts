@@ -263,8 +263,157 @@ async function seedNetwork() {
   console.log("Seeded network demo data: 6 VLANs, 6 subnets, 1 rack, switch ports, 3 Wi-Fi networks.");
 }
 
+/** KB categories, the standard templates and a few demo articles — only when the KB is empty. */
+async function seedKb() {
+  if (await db.article.count()) return;
+  const cat = async (name: string, description: string) => db.kbCategory.upsert({ where: { name }, create: { name, description }, update: {} });
+  const clinical = await cat("Clinical systems", "EHR, PACS, lab and medical-device procedures");
+  const infra = await cat("Infrastructure", "Servers, network, storage, backups");
+  const desk = await cat("Service desk", "How-tos for common tickets");
+  await cat("Security", "Access, incidents, compliance");
+
+  const DAY = 86_400_000;
+  const article = async (title: string, body: string, o: { categoryId?: string; tags?: string[]; isTemplate?: boolean; status?: "DRAFT" | "PUBLISHED"; reviewEveryDays?: number; links?: { toType: string; toId: string }[] } = {}) => {
+    const a = await db.article.create({
+      data: {
+        title, body, categoryId: o.categoryId, tags: o.tags ?? [], isTemplate: !!o.isTemplate, status: o.isTemplate ? "PUBLISHED" : (o.status ?? "PUBLISHED"),
+        reviewEveryDays: o.reviewEveryDays, reviewDueAt: o.reviewEveryDays ? new Date(Date.now() + o.reviewEveryDays * DAY) : null,
+        createdBy: "seed", updatedBy: "seed",
+      },
+    });
+    await db.articleVersion.create({ data: { articleId: a.id, version: 1, title, body, changeNote: "Created", editedByName: "seed" } });
+    for (const l of o.links ?? []) await db.entityLink.create({ data: { fromType: "Article", fromId: a.id, toType: l.toType, toId: l.toId, kind: "documents" } });
+    return a;
+  };
+
+  // ── Templates ──
+  await article("Standard operating procedure (SOP)", `## Purpose
+Why this procedure exists and when to use it.
+
+## Scope
+Systems, sites and people this applies to.
+
+## Roles
+| Role | Responsibility |
+|---|---|
+| Technician | |
+| Approver | |
+
+## Procedure
+1. Step one
+2. Step two
+
+## Verification
+- [ ] How to confirm it worked
+
+## References
+- Related articles, vendor docs`, { isTemplate: true, tags: ["sop"] });
+  await article("Runbook", `> [!NOTE] Use this runbook when …
+
+## Symptoms
+What users or monitoring report.
+
+## Diagnosis
+1. Check …
+
+## Fix
+1. …
+
+## Escalation
+| When | Who | Contact |
+|---|---|---|
+| Not fixed in 30 min | On-call engineer | |
+
+## Rollback
+How to undo the change safely.`, { isTemplate: true, tags: ["runbook"] });
+  await article("New starter onboarding", `## Before day one
+- [ ] AD account created and added to role groups
+- [ ] Email and Teams licence assigned
+- [ ] Device allocated and tagged (record the asset tag)
+
+## Day one
+- [ ] Badge photo and access card
+- [ ] EHR training booked
+- [ ] Password and MFA set up in person
+
+## Notes
+`, { isTemplate: true, tags: ["onboarding"] });
+  await article("Downtime procedure", `> [!WARNING] Follow the hospital incident-command instructions first.
+
+## Trigger
+When to declare downtime.
+
+## Communication
+- Notify the service desk and the on-call manager
+- Post on the status page
+
+## During downtime
+1. Switch to paper forms (location: …)
+2. …
+
+## Recovery
+1. Back-entry of paper records
+2. Confirm interfaces are flowing`, { isTemplate: true, tags: ["downtime"] });
+
+  // ── Demo articles ──
+  const ed = await db.location.findUnique({ where: { code: "ED" } });
+  const mdf = await db.location.findUnique({ where: { code: "MDF" } });
+  const printers = await db.asset.findMany({ where: { type: { name: "Printer" }, deletedAt: null }, select: { id: true }, take: 3 });
+  const hosts = await db.asset.findMany({ where: { type: { name: "Server" }, deletedAt: null }, select: { id: true }, take: 2 });
+
+  await article("EHR downtime procedure — Emergency Dept", `> [!WARNING] Call the service desk on **x2210** before starting. Downtime is declared by the duty manager only.
+
+## When to use
+The EHR is unavailable for more than **15 minutes** in the Emergency Department.
+
+## Steps
+1. Open the red downtime box at the nurse station (shelf under the label printer).
+2. Print the latest census from the downtime PC \`ED-DT-01\` — it holds a read-only copy refreshed every 15 minutes.
+3. Use paper triage and medication forms; record the time on every sheet.
+4. Every hour, check the status page: https://status.example.org
+
+## Recovery
+- [ ] EHR back up and confirmed by the service desk
+- [ ] Back-enter paper records within 24 hours
+- [ ] Return the downtime box to the nurse station and restock forms`, { categoryId: clinical.id, tags: ["ehr", "downtime", "emergency"], reviewEveryDays: 180, links: ed ? [{ toType: "Location", toId: ed.id }] : [] });
+
+  await article("Zebra label printer: clear a label jam", `## Symptoms
+Labels feed crooked, or the status light flashes **red**.
+
+## Fix
+1. Open the lid and remove the label roll.
+2. Peel any stuck labels off the platen roller — never use a blade.
+3. Reload the roll **label side up**, guiding it under the media guides.
+4. Hold the feed button for 2 seconds to calibrate.
+
+> [!TIP] If labels still skip, clean the print head with an alcohol swab and let it dry for 1 minute.`, { categoryId: desk.id, tags: ["printer", "zebra"], links: printers.map((p) => ({ toType: "Asset", toId: p.id })) });
+
+  await article("Hypervisor host patching", `## Before you start
+- Change ticket approved (CAB)
+- Maintenance window: Sunday 02:00–05:00
+
+## Procedure
+1. Put the host into maintenance mode; wait for VMs to migrate.
+2. Apply the vendor bundle.
+3. Reboot and check iDRAC for hardware alerts.
+4. Exit maintenance mode.
+
+| Host | iDRAC | Order |
+|---|---|---|
+| HOSP-SER-103 | 10.10.10.103 | 1 |
+| HOSP-SER-112 | 10.10.10.112 | 2 |`, { categoryId: infra.id, tags: ["vmware", "patching"], reviewEveryDays: 365, links: [...hosts.map((h) => ({ toType: "Asset", toId: h.id })), ...(mdf ? [{ toType: "Location", toId: mdf.id }] : [])] });
+
+  await article("Wi-Fi: connecting a new infusion pump", `Draft — waiting for Biomed to confirm the drug-library step.
+
+1. Join SSID **HOSP-Biomed** (key in the vault: *Biomed Wi-Fi PSK*).
+2. Record the MAC address in the asset record.`, { categoryId: clinical.id, tags: ["biomed", "wifi"], status: "DRAFT" });
+
+  console.log("Seeded knowledge base: 4 categories, 4 templates, 4 articles.");
+}
+
 main()
   .then(seedNetwork)
+  .then(seedKb)
   .catch((e) => {
     console.error(e);
     process.exit(1);

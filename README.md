@@ -1,6 +1,6 @@
 # ITDocs — IT Documentation Management System
 
-Self-hosted web app for documenting IT: assets and **where they have moved**, locations, people, credentials, network, and (in later phases) knowledge base, software & licences, vendors & contracts, changes & incidents. It is built for hospitals but works for any industry; medical-device features can be switched off.
+Self-hosted web app for documenting IT: assets and **where they have moved**, locations, people, credentials, network, a knowledge base, and (in later phases) software & licences, vendors & contracts, changes & incidents. It is built for hospitals but works for any industry; medical-device features can be switched off.
 
 ## Status
 
@@ -10,7 +10,7 @@ Self-hosted web app for documenting IT: assets and **where they have moved**, lo
 | 2 | Locations, assets, custom asset types/fields, **movement log**, check-out/in, QR labels + phone scanning, disposal with wipe records, medical-device fields, CSV import/export | ✅ done |
 | 3 | Password vault: AES-256-GCM, folder access control, audited reveal/copy, TOTP codes, password history, rotation reminders, links to assets | ✅ done |
 | 4 | Network: IPAM with visual IP grid, VLANs, racks with U-layout, switch-port / patch-panel / wall-jack mapping, Wi-Fi linked to the vault | ✅ done |
-| 5 | Knowledge base / SOPs with versions & templates | planned |
+| 5 | Knowledge base: Markdown SOPs and runbooks, full version history with diff and restore, templates, tags, categories, review reminders, attachments, links to assets and locations | ✅ done |
 | 6 | Software & licences, vendors & contracts | planned |
 | 7 | Changes, incidents, daily journal | planned |
 | 8 | Diagrams, relationship map, reports, email/Teams alerts | planned |
@@ -56,6 +56,16 @@ npm run vault:rotate                   # re-encrypts everything; safe to re-run
 - **Wi-Fi** networks record SSID, security, VLAN and site. The key or RADIUS secret stays in the vault: the network only links to the credential, and that link is shown only to people who can open its folder.
 - **Asset page.** It lists the asset's IP addresses, the switch port it's patched into, its rack position and, for switches, the documented ports.
 - Every change is audited; releasing an address or deleting a subnet keeps the old records in the audit entry.
+
+## Knowledge base (phase 5)
+
+- **Articles** are written in Markdown, with Write and Preview tabs and buttons for steps, checklists, tables and callouts such as `> [!WARNING]`. Raw HTML is never rendered: it shows as text, and links can only point to http(s), mailto or pages inside ITDocs.
+- **Every save that changes the title or text creates a new version.** Versions can't be edited or deleted; a database trigger enforces this, as it does for the audit log. History shows who changed what, with a line-by-line diff between any two versions. Restoring an old version adds it as a new version, so nothing is lost. If two people edit the same article, the second save is refused rather than silently overwriting the first.
+- **Templates.** SOP, runbook, new-starter onboarding and downtime-procedure templates are seeded. Technicians can add their own.
+- **Who sees what.** Read-only and Auditor roles see published and archived articles. Drafts and templates are visible only to technicians and admins.
+- **Review reminders.** Set "review every N days" on an article. Overdue articles are flagged in the knowledge base and on the dashboard. "Mark as reviewed" records the review in the audit log and schedules the next one.
+- **Links and files.** Link articles to assets and locations; they appear in a *Documentation* panel on those pages. Attachments (up to 10 MB) are stored in `UPLOAD_DIR`, not in the database, so back that folder up too. Files are always downloaded, never opened in the browser.
+- Global search covers article titles, text and tags.
 
 ## Production install (Docker, Linux)
 

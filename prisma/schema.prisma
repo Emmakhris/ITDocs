@@ -1,5 +1,5 @@
 // ITDocs — IT Documentation Management System
-// Phase 1 (foundation) + Phase 2 (locations, assets, movement) + Phase 3 (vault) + Phase 4 (network)
+// Phase 1 (foundation) + Phase 2 (locations, assets, movement) + Phase 3 (vault) + Phase 4 (network) + Phase 5 (knowledge base)
 
 generator client {
   provider        = "prisma-client-js"
@@ -47,6 +47,8 @@ model User {
   movements AssetMovement[] @relation("MovedBy")
   checkoutsHandled Checkout[] @relation("CheckedOutBy")
   vaultGrants      VaultFolderAccess[]
+  articleVersions  ArticleVersion[]
+  ownedArticles    Article[]  @relation("ArticleOwner")
 }
 
 model Session {
@@ -623,4 +625,72 @@ model WifiNetwork {
   updatedAt    DateTime    @updatedAt
 
   @@index([ssid])
+}
+
+// ───────────────────────────── Knowledge base (phase 5) ─────────────────────────────
+// Articles are Markdown. Every save writes an ArticleVersion row; versions are append-only
+// (database trigger, see migration), so history and restore can be trusted for audits.
+
+enum ArticleStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model KbCategory {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  createdAt   DateTime  @default(now())
+
+  articles Article[]
+}
+
+model Article {
+  id              String        @id @default(cuid())
+  title           String
+  categoryId      String?
+  category        KbCategory?   @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  tags            String[]
+  status          ArticleStatus @default(DRAFT)
+  /// Templates are articles used as a starting point for new ones (SOP, runbook, onboarding…)
+  isTemplate      Boolean       @default(false)
+  body            String
+  /// Current version number; bumped on every save (optimistic concurrency check on edit)
+  version         Int           @default(1)
+  ownerId         String?
+  owner           User?         @relation("ArticleOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  reviewEveryDays Int?
+  reviewDueAt     DateTime?
+  lastReviewedAt  DateTime?
+  createdBy       String
+  updatedBy       String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  deletedAt       DateTime?
+
+  versions ArticleVersion[]
+
+  @@index([status, isTemplate])
+  @@index([categoryId])
+  @@index([reviewDueAt])
+  @@index([tags], type: Gin)
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "Article_title_trgm")
+  @@index([body(ops: raw("gin_trgm_ops"))], type: Gin, map: "Article_body_trgm")
+}
+
+model ArticleVersion {
+  id           String   @id @default(cuid())
+  articleId    String
+  article      Article  @relation(fields: [articleId], references: [id])
+  version      Int
+  title        String
+  body         String
+  changeNote   String?
+  editedById   String?
+  editedBy     User?    @relation(fields: [editedById], references: [id])
+  editedByName String
+  createdAt    DateTime @default(now())
+
+  @@unique([articleId, version])
 }

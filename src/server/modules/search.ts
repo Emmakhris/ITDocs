@@ -62,6 +62,34 @@ export async function globalSearch(ctx: Ctx, q: string, limit = 8): Promise<Sear
       ),
     );
   }
+  if (can(ctx.user.role, "kb", "read")) {
+    // Drafts and templates only for people who can edit the KB
+    const draftsOk = can(ctx.user.role, "kb", "write");
+    tasks.push(
+      db.article
+        .findMany({
+          where: {
+            deletedAt: null,
+            ...(draftsOk ? {} : { isTemplate: false, status: { not: "DRAFT" } }),
+            OR: [{ title: ci }, { tags: { has: term.toLowerCase() } }, { body: ci }],
+          },
+          select: { id: true, title: true, status: true, isTemplate: true, tags: true },
+          orderBy: { updatedAt: "desc" },
+          take: limit,
+        })
+        .then((rows) => {
+          rows.sort((a, b) => Number(b.title.toLowerCase().includes(term.toLowerCase())) - Number(a.title.toLowerCase().includes(term.toLowerCase())));
+          for (const a of rows)
+            hits.push({
+              kind: "Article",
+              id: a.id,
+              title: a.title,
+              subtitle: [a.isTemplate ? "template" : a.status !== "PUBLISHED" ? a.status.toLowerCase() : null, ...a.tags.slice(0, 3)].filter(Boolean).join(" · ") || undefined,
+              href: `/kb/${a.id}`,
+            });
+        }),
+    );
+  }
   if (can(ctx.user.role, "network", "read")) {
     const ipPrefix = /^[\d.]+$/.test(term);
     tasks.push(

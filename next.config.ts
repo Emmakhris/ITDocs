@@ -14,7 +14,8 @@ const nextConfig: NextConfig = {
   distDir: process.env.NEXT_DIST_DIR || ".next",
   outputFileTracingRoot: process.cwd(),
   serverExternalPackages: ["ldapts"],
-  experimental: { serverActions: { bodySizeLimit: "10mb" } },
+  // 12 MB: 10 MB knowledge-base attachments plus form overhead
+  experimental: { serverActions: { bodySizeLimit: "12mb" } },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

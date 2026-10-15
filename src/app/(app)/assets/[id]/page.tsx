@@ -8,6 +8,8 @@ import { locationTree } from "@/server/modules/locations";
 import { getSettings } from "@/server/modules/settings";
 import { credentialsForAsset } from "@/server/modules/vault";
 import { assetNetwork } from "@/server/modules/network";
+import { articlesFor } from "@/server/modules/kb";
+import { DocumentationCard } from "@/components/kb-links";
 import { NotFoundError } from "@/server/lib/errors";
 import { db } from "@/server/db";
 import { Badge, Card, DL, LinkButton, PageHeader, StatusBadge, fmtDate, fmtDateTime, Input, Button } from "@/components/ui";
@@ -35,13 +37,14 @@ export default async function AssetDetail({
     if (e instanceof NotFoundError) notFound();
     throw e;
   });
-  const [movements, history, locations, settings, credentials, network] = await Promise.all([
+  const [movements, history, locations, settings, credentials, network, articles] = await Promise.all([
     assetMovements(ctx, a.id),
     entityHistory("Asset", a.id),
     locationTree(),
     getSettings(),
     credentialsForAsset(ctx, a.id),
     assetNetwork(ctx, a.id),
+    articlesFor(ctx, "Asset", a.id),
   ]);
   const atDate = sp.at ? new Date(sp.at) : null;
   const atResult = atDate && !Number.isNaN(atDate.getTime()) ? await assetAt(ctx, a.id, atDate) : null;
@@ -297,6 +300,8 @@ export default async function AssetDetail({
               <p className="whitespace-pre-wrap text-sm">{a.notes}</p>
             </Card>
           )}
+
+          {can(ctx.user.role, "kb", "read") && <DocumentationCard articles={articles} canWrite={can(ctx.user.role, "kb", "write")} />}
 
           {can(ctx.user.role, "vault", "read") && (
             <Card title="Credentials" actions={<Link className="text-xs text-brand hover:underline" href={`/vault/new?assetId=${a.id}`}>Add</Link>}>
