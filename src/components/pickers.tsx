@@ -15,7 +15,7 @@ export function RemotePicker({
   id,
 }: {
   name: string;
-  kind: "people" | "assets";
+  kind: "people" | "assets" | "credentials";
   initial?: Option | null;
   placeholder?: string;
   id?: string;

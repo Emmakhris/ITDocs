@@ -1,5 +1,5 @@
 // ITDocs — IT Documentation Management System
-// Phase 1 (foundation) + Phase 2 (locations, assets, movement)
+// Phase 1 (foundation) + Phase 2 (locations, assets, movement) + Phase 3 (vault) + Phase 4 (network)
 
 generator client {
   provider        = "prisma-client-js"
@@ -163,6 +163,10 @@ model Location {
   assets        Asset[]
   movementsFrom AssetMovement[] @relation("FromLocation")
   movementsTo   AssetMovement[] @relation("ToLocation")
+  vlans         Vlan[]
+  subnets       Subnet[]
+  racks         Rack[]
+  wifiNetworks  WifiNetwork[]
 
   @@index([parentId])
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Location_name_trgm")
@@ -242,6 +246,12 @@ model Asset {
   movements AssetMovement[]
   checkouts Checkout[]
   disposal  Disposal?
+
+  // Network (phase 4)
+  ipAddresses    IpAddress[]
+  switchPorts    SwitchPort[] @relation("SwitchPorts")
+  connectedPorts SwitchPort[] @relation("PortConnectedAsset")
+  rackMount      RackMount?
 
   @@index([status])
   @@index([locationId])
@@ -429,7 +439,8 @@ model Credential {
   updatedAt         DateTime    @updatedAt
   deletedAt         DateTime?
 
-  history CredentialHistory[]
+  history      CredentialHistory[]
+  wifiNetworks WifiNetwork[]
 
   @@index([folderId])
   @@index([rotationDueAt])
@@ -446,4 +457,170 @@ model CredentialHistory {
   replacedBy   String
 
   @@index([credentialId, replacedAt])
+}
+
+// ───────────────────────────── Network (phase 4) ─────────────────────────────
+// IPv4 only. Addresses and CIDRs are stored normalised as text; maths lives in src/server/lib/ip.ts.
+
+model Vlan {
+  id         String    @id @default(cuid())
+  number     Int
+  name       String
+  /// Site (or building) the VLAN belongs to; the same number may be reused at another site
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id])
+  purpose    String?
+  notes      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  subnets      Subnet[]
+  switchPorts  SwitchPort[]
+  wifiNetworks WifiNetwork[]
+
+  @@unique([locationId, number])
+  @@index([number])
+}
+
+model Subnet {
+  id         String    @id @default(cuid())
+  cidr       String    @unique // normalised network address, e.g. 10.20.0.0/24
+  name       String
+  vlanId     String?
+  vlan       Vlan?     @relation(fields: [vlanId], references: [id], onDelete: SetNull)
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id])
+  gateway    String?
+  dhcpStart  String?
+  dhcpEnd    String?
+  dns        String? // comma-separated resolvers
+  notes      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  addresses IpAddress[]
+
+  @@index([vlanId])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Subnet_name_trgm")
+}
+
+enum IpStatus {
+  FREE
+  RESERVED
+  ASSIGNED
+  DHCP
+}
+
+model IpAddress {
+  id         String   @id @default(cuid())
+  subnetId   String
+  subnet     Subnet   @relation(fields: [subnetId], references: [id], onDelete: Cascade)
+  address    String
+  status     IpStatus @default(ASSIGNED)
+  hostname   String?
+  macAddress String?
+  assetId    String?
+  asset      Asset?   @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([subnetId, address])
+  @@index([address])
+  @@index([assetId])
+  @@index([hostname])
+}
+
+model Rack {
+  id         String    @id @default(cuid())
+  name       String
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id])
+  heightU    Int       @default(42)
+  notes      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  mounts RackMount[]
+
+  @@index([locationId])
+}
+
+/// Something occupying rack units: an asset, or a labelled non-asset item (patch panel, blanking plate, shelf).
+model RackMount {
+  id        String   @id @default(cuid())
+  rackId    String
+  rack      Rack     @relation(fields: [rackId], references: [id], onDelete: Cascade)
+  assetId   String?  @unique
+  asset     Asset?   @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  label     String?
+  /// Lowest rack unit occupied (1 = bottom)
+  positionU Int
+  heightU   Int      @default(1)
+  createdAt DateTime @default(now())
+
+  @@index([rackId])
+}
+
+enum PortMode {
+  ACCESS
+  TRUNK
+}
+
+enum PortStatus {
+  ACTIVE
+  INACTIVE
+  DISABLED
+  FAULTY
+}
+
+model SwitchPort {
+  id               String     @id @default(cuid())
+  switchId         String
+  switch           Asset      @relation("SwitchPorts", fields: [switchId], references: [id])
+  name             String // e.g. Gi1/0/12
+  description      String?
+  connectedAssetId String?
+  connectedAsset   Asset?     @relation("PortConnectedAsset", fields: [connectedAssetId], references: [id], onDelete: SetNull)
+  patchPanelPort   String?
+  wallJack         String?
+  vlanId           String?
+  vlan             Vlan?      @relation(fields: [vlanId], references: [id], onDelete: SetNull)
+  mode             PortMode   @default(ACCESS)
+  /// Trunk: allowed VLAN list as typed, e.g. "10,20,100-110"
+  allowedVlans     String?
+  status           PortStatus @default(ACTIVE)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@unique([switchId, name])
+  @@index([connectedAssetId])
+  @@index([wallJack])
+}
+
+enum WifiAuth {
+  OPEN
+  WPA2_PSK
+  WPA3_SAE
+  WPA2_ENTERPRISE
+  WPA3_ENTERPRISE
+}
+
+model WifiNetwork {
+  id           String      @id @default(cuid())
+  ssid         String
+  auth         WifiAuth    @default(WPA2_ENTERPRISE)
+  vlanId       String?
+  vlan         Vlan?       @relation(fields: [vlanId], references: [id], onDelete: SetNull)
+  /// Pre-shared key / RADIUS secret lives in the vault; only the link is stored here
+  credentialId String?
+  credential   Credential? @relation(fields: [credentialId], references: [id], onDelete: SetNull)
+  locationId   String?
+  location     Location?   @relation(fields: [locationId], references: [id])
+  hidden       Boolean     @default(false)
+  notes        String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([ssid])
 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCtx } from "@/server/auth/session";
 import { can } from "@/server/rbac/permissions";
 import { db } from "@/server/db";
+import { accessibleFolderIds } from "@/server/modules/vault";
 
 export async function GET(req: Request, { params }: { params: Promise<{ kind: string }> }) {
   const ctx = await getCtx();
@@ -26,6 +27,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ kind: st
       take: 20,
     });
     return NextResponse.json(rows.map((a) => ({ id: a.id, label: `${a.tag} · ${a.name}`, sub: a.serial ?? undefined })));
+  }
+  if (kind === "credentials" && can(ctx.user.role, "vault", "read")) {
+    // Titles only, from folders this user may open — never secrets
+    const rows = await db.credential.findMany({
+      where: { deletedAt: null, folderId: { in: await accessibleFolderIds(ctx) }, ...(q ? { OR: [{ title: ci }, { username: ci }] } : {}) },
+      include: { folder: { select: { name: true } } },
+      orderBy: { title: "asc" },
+      take: 20,
+    });
+    return NextResponse.json(rows.map((c) => ({ id: c.id, label: c.title, sub: [c.folder.name, c.username].filter(Boolean).join(" · ") })));
   }
   return NextResponse.json({ error: "not found" }, { status: 404 });
 }

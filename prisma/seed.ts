@@ -1,4 +1,4 @@
-/* Seed: break-glass admin, AD group mappings, asset types, and (if empty) demo data. Safe to re-run. */
+/* Seed: break-glass admin, AD group mappings, asset types, and (if empty) demo data incl. network. Safe to re-run. */
 import { PrismaClient, type LocationType, type AssetStatus } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
@@ -191,7 +191,80 @@ async function pathOf(id: string) {
   return parts.join(" › ");
 }
 
+/** Demo VLANs, subnets, a rack, switch ports and Wi-Fi — only when no network data exists yet. */
+async function seedNetwork() {
+  if (await db.vlan.count()) return;
+  const main = await db.location.findUnique({ where: { code: "MAIN" } });
+  const west = await db.location.findUnique({ where: { code: "WEST" } });
+  const mdf = await db.location.findUnique({ where: { code: "MDF" } });
+  if (!main || !mdf) return console.log("Demo locations missing — skipping network demo data.");
+
+  const vlan = (number: number, name: string, purpose: string, locationId: string | null = main.id) =>
+    db.vlan.create({ data: { number, name, purpose, locationId } });
+  const mgmt = await vlan(10, "Management", "Switch, AP and iDRAC management. Admin workstations only.");
+  const servers = await vlan(20, "Servers", "Data-centre servers and storage.");
+  const clinical = await vlan(30, "Clinical workstations", "Nurse stations, WOWs and clinician laptops (wired).");
+  const biomed = await vlan(40, "Biomed", "Infusion pumps and patient monitors — isolated, no internet.");
+  const guest = await vlan(99, "Guest", "Patient & visitor Wi-Fi. Internet only, client isolation on.");
+  const westData = west ? await vlan(30, "Clinic data", "All wired devices at Westside Clinic.", west.id) : null;
+
+  const subnet = (cidr: string, name: string, vlanId: string, extra: { gateway?: string; dhcpStart?: string; dhcpEnd?: string; dns?: string; locationId?: string } = {}) =>
+    db.subnet.create({ data: { cidr, name, vlanId, locationId: main.id, dns: "10.10.20.10, 10.10.20.11", ...extra } });
+  const mgmtNet = await subnet("10.10.10.0/24", "Management", mgmt.id, { gateway: "10.10.10.1" });
+  const srvNet = await subnet("10.10.20.0/24", "Servers", servers.id, { gateway: "10.10.20.1" });
+  const clinNet = await subnet("10.10.32.0/22", "Clinical workstations", clinical.id, { gateway: "10.10.32.1", dhcpStart: "10.10.33.0", dhcpEnd: "10.10.35.200" });
+  await subnet("10.10.40.0/24", "Biomed devices", biomed.id, { gateway: "10.10.40.1", dhcpStart: "10.10.40.100", dhcpEnd: "10.10.40.240" });
+  await subnet("172.16.0.0/22", "Guest Wi-Fi", guest.id, { gateway: "172.16.0.1", dhcpStart: "172.16.0.10", dhcpEnd: "172.16.3.250", dns: "1.1.1.1, 9.9.9.9" });
+  if (westData && west) await subnet("10.20.30.0/24", "Westside Clinic", westData.id, { gateway: "10.20.30.1", dhcpStart: "10.20.30.100", dhcpEnd: "10.20.30.200", locationId: west.id });
+
+  await db.ipAddress.createMany({
+    data: [
+      { subnetId: srvNet.id, address: "10.10.20.10", status: "ASSIGNED", hostname: "dc01" },
+      { subnetId: srvNet.id, address: "10.10.20.11", status: "ASSIGNED", hostname: "dc02" },
+      { subnetId: srvNet.id, address: "10.10.20.50", status: "RESERVED", notes: "Future SAN controller" },
+      { subnetId: clinNet.id, address: "10.10.32.20", status: "RESERVED", hostname: "ed-printer-01" },
+    ],
+  });
+
+  // Hosts and switches in the MDF get addresses, rack positions and ports
+  const assets = await db.asset.findMany({ where: { locationId: mdf.id, deletedAt: null }, include: { type: true }, orderBy: { tag: "asc" } });
+  const hosts = assets.filter((a) => a.type.name === "Server");
+  const switches = assets.filter((a) => a.type.name === "Network Switch");
+  const rack = await db.rack.create({ data: { name: "MDF-R01", locationId: mdf.id, heightU: 42, notes: "Main distribution frame, Tower A floor 1. Dual PDUs on UPS-A/UPS-B." } });
+  await db.rackMount.createMany({ data: [{ rackId: rack.id, label: "Patch panel A (1–48)", positionU: 42, heightU: 1 }, { rackId: rack.id, label: "Patch panel B (1–48)", positionU: 40, heightU: 1 }] });
+  for (const [i, sw] of switches.entries()) {
+    await db.rackMount.create({ data: { rackId: rack.id, assetId: sw.id, positionU: 38 - i, heightU: 1 } });
+    await db.ipAddress.create({ data: { subnetId: mgmtNet.id, address: `10.10.10.${11 + i}`, status: "ASSIGNED", hostname: `sw-mdf-${i + 1}`, assetId: sw.id } });
+    await db.switchPort.createMany({
+      data: Array.from({ length: 48 }, (_, p) => ({
+        switchId: sw.id,
+        name: `Gi1/0/${p + 1}`,
+        vlanId: p < 24 ? clinical.id : biomed.id,
+        status: p < 6 ? ("ACTIVE" as const) : ("INACTIVE" as const),
+        patchPanelPort: i === 0 ? `PP-A ${p + 1}` : null,
+        wallJack: i === 0 && p < 6 ? `TA-1-${String(101 + p)}` : null,
+      })),
+    });
+    await db.switchPort.create({ data: { switchId: sw.id, name: "Te1/1/1", mode: "TRUNK", allowedVlans: "10,20,30,40,99", description: "Uplink to core" } });
+  }
+  for (const [i, h] of hosts.entries()) {
+    await db.rackMount.create({ data: { rackId: rack.id, assetId: h.id, positionU: 10 + i * 2, heightU: 2 } });
+    await db.ipAddress.create({ data: { subnetId: srvNet.id, address: `10.10.20.${21 + i}`, status: "ASSIGNED", hostname: h.hostname, assetId: h.id } });
+    if (switches[0]) await db.switchPort.updateMany({ where: { switchId: switches[0].id, name: `Gi1/0/${1 + i}` }, data: { connectedAssetId: h.id, vlanId: servers.id, description: `${h.hostname} NIC1` } });
+  }
+
+  await db.wifiNetwork.createMany({
+    data: [
+      { ssid: "HOSP-Clinical", auth: "WPA3_ENTERPRISE", vlanId: clinical.id, locationId: main.id, notes: "802.1X via NPS; machine + user certificates." },
+      { ssid: "HOSP-Biomed", auth: "WPA2_PSK", vlanId: biomed.id, locationId: main.id, hidden: true, notes: "Pumps only support WPA2-PSK. Rotate the key with Biomed." },
+      { ssid: "HOSP-Guest", auth: "OPEN", vlanId: guest.id, notes: "Captive portal on the firewall." },
+    ],
+  });
+  console.log("Seeded network demo data: 6 VLANs, 6 subnets, 1 rack, switch ports, 3 Wi-Fi networks.");
+}
+
 main()
+  .then(seedNetwork)
   .catch((e) => {
     console.error(e);
     process.exit(1);

@@ -7,6 +7,7 @@ import { entityHistory } from "@/server/modules/audit-query";
 import { locationTree } from "@/server/modules/locations";
 import { getSettings } from "@/server/modules/settings";
 import { credentialsForAsset } from "@/server/modules/vault";
+import { assetNetwork } from "@/server/modules/network";
 import { NotFoundError } from "@/server/lib/errors";
 import { db } from "@/server/db";
 import { Badge, Card, DL, LinkButton, PageHeader, StatusBadge, fmtDate, fmtDateTime, Input, Button } from "@/components/ui";
@@ -34,12 +35,13 @@ export default async function AssetDetail({
     if (e instanceof NotFoundError) notFound();
     throw e;
   });
-  const [movements, history, locations, settings, credentials] = await Promise.all([
+  const [movements, history, locations, settings, credentials, network] = await Promise.all([
     assetMovements(ctx, a.id),
     entityHistory("Asset", a.id),
     locationTree(),
     getSettings(),
     credentialsForAsset(ctx, a.id),
+    assetNetwork(ctx, a.id),
   ]);
   const atDate = sp.at ? new Date(sp.at) : null;
   const atResult = atDate && !Number.isNaN(atDate.getTime()) ? await assetAt(ctx, a.id, atDate) : null;
@@ -123,6 +125,65 @@ export default async function AssetDetail({
               ]}
             />
           </Card>
+
+          {network && (network.ips.length > 0 || network.links.length > 0 || network.mount || Object.keys(network.ports).length > 0) && (
+            <Card title="Network">
+              <DL
+                items={[
+                  [
+                    "IP addresses",
+                    network.ips.length > 0 && (
+                      <ul className="space-y-0.5">
+                        {network.ips.map((ip) => (
+                          <li key={ip.id}>
+                            <Link className="font-mono text-brand hover:underline" href={`/network/subnets/${ip.subnetId}?ip=${ip.address}`}>{ip.address}</Link>
+                            <span className="ml-1 text-xs text-muted">
+                              {[ip.status.toLowerCase(), ip.hostname, ip.subnet.cidr, ip.subnet.vlan && `VLAN ${ip.subnet.vlan.number}`].filter(Boolean).join(" · ")}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ),
+                  ],
+                  [
+                    "Switch port",
+                    network.links.length > 0 && (
+                      <ul className="space-y-0.5">
+                        {network.links.map((p) => (
+                          <li key={p.id}>
+                            <Link className="text-brand hover:underline" href={`/network?tab=ports&switchId=${p.switch.id}`}>
+                              <span className="font-mono">{p.switch.tag} {p.name}</span>
+                            </Link>
+                            <span className="ml-1 text-xs text-muted">
+                              {[p.mode === "TRUNK" ? `trunk ${p.allowedVlans ?? "all"}` : p.vlan && `VLAN ${p.vlan.number}`, p.patchPanelPort && `panel ${p.patchPanelPort}`, p.wallJack && `jack ${p.wallJack}`].filter(Boolean).join(" · ")}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ),
+                  ],
+                  [
+                    "Rack position",
+                    network.mount && (
+                      <Link className="text-brand hover:underline" href={`/network/racks/${network.mount.rack.id}`}>
+                        {network.mount.rack.name} · U{network.mount.positionU}
+                        {network.mount.heightU > 1 && `–${network.mount.positionU + network.mount.heightU - 1}`}
+                        {network.mount.rack.location && ` (${network.mount.rack.location.name})`}
+                      </Link>
+                    ),
+                  ],
+                  ...(Object.keys(network.ports).length > 0
+                    ? [[
+                        "Ports on this device",
+                        <Link key="ports" className="text-brand hover:underline" href={`/network?tab=ports&switchId=${a.id}`}>
+                          {Object.values(network.ports).reduce((n, c) => n + (c ?? 0), 0)} documented ({network.ports.ACTIVE ?? 0} active)
+                        </Link>,
+                      ] as [string, React.ReactNode]]
+                    : []),
+                ]}
+              />
+            </Card>
+          )}
 
           {settings.medicalModule && a.type.isMedical && (
             <Card title="Medical device">

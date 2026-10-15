@@ -93,7 +93,7 @@ export function GlobalSearch() {
                 onClick={() => go(h)}
                 className={cx("flex w-full items-start gap-2 px-3 py-2 text-left text-sm", i === sel && "bg-surface-2")}
               >
-                <span className="mt-0.5 w-16 shrink-0 text-[11px] uppercase tracking-wide text-muted">{h.kind}</span>
+                <span className="mt-0.5 w-20 shrink-0 text-[11px] uppercase tracking-wide text-muted">{h.kind}</span>
                 <span className="min-w-0">
                   <span className="block truncate">{h.title}</span>
                   {h.subtitle && <span className="block truncate text-xs text-muted">{h.subtitle}</span>}

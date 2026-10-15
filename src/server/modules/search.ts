@@ -62,6 +62,41 @@ export async function globalSearch(ctx: Ctx, q: string, limit = 8): Promise<Sear
       ),
     );
   }
+  if (can(ctx.user.role, "network", "read")) {
+    const ipPrefix = /^[\d.]+$/.test(term);
+    tasks.push(
+      db.subnet.findMany({ where: { OR: [{ name: ci }, { cidr: { startsWith: term } }] }, include: { vlan: true }, take: limit }).then((rows) => {
+        for (const s of rows) hits.push({ kind: "Subnet", id: s.id, title: `${s.cidr} · ${s.name}`, subtitle: s.vlan ? `VLAN ${s.vlan.number} ${s.vlan.name}` : undefined, href: `/network/subnets/${s.id}` });
+      }),
+      db.ipAddress
+        .findMany({
+          where: { OR: [...(ipPrefix ? [{ address: { startsWith: term } }] : []), { hostname: ci }, { macAddress: ci }] },
+          include: { subnet: { select: { id: true, cidr: true } } },
+          take: limit,
+        })
+        .then((rows) => {
+          for (const a of rows)
+            hits.push({ kind: "IP address", id: a.id, title: a.address, subtitle: [a.hostname, a.subnet.cidr, a.status.toLowerCase()].filter(Boolean).join(" · "), href: `/network/subnets/${a.subnet.id}?ip=${a.address}` });
+        }),
+      db.vlan
+        .findMany({ where: { OR: [{ name: ci }, { purpose: ci }, ...(/^\d{1,4}$/.test(term) ? [{ number: Number(term) }] : [])] }, take: limit })
+        .then((rows) => {
+          for (const v of rows) hits.push({ kind: "VLAN", id: v.id, title: `VLAN ${v.number} · ${v.name}`, subtitle: v.purpose ?? undefined, href: `/network?tab=vlans&edit=${v.id}` });
+        }),
+      db.rack.findMany({ where: { name: ci }, include: { location: true }, take: limit }).then((rows) => {
+        for (const r of rows) hits.push({ kind: "Rack", id: r.id, title: r.name, subtitle: [r.location?.name, `${r.heightU}U`].filter(Boolean).join(" · "), href: `/network/racks/${r.id}` });
+      }),
+      db.switchPort
+        .findMany({ where: { OR: [{ wallJack: ci }, { patchPanelPort: ci }, { description: ci }] }, include: { switch: { select: { tag: true } } }, take: limit })
+        .then((rows) => {
+          for (const p of rows)
+            hits.push({ kind: "Switch port", id: p.id, title: `${p.switch.tag} ${p.name}`, subtitle: [p.wallJack && `jack ${p.wallJack}`, p.patchPanelPort && `panel ${p.patchPanelPort}`, p.description].filter(Boolean).join(" · "), href: `/network?tab=ports&switchId=${p.switchId}&edit=${p.id}` });
+        }),
+      db.wifiNetwork.findMany({ where: { ssid: ci }, take: limit }).then((rows) => {
+        for (const w of rows) hits.push({ kind: "Wi-Fi", id: w.id, title: w.ssid, subtitle: w.auth.replace("_", " "), href: `/network?tab=wifi&edit=${w.id}` });
+      }),
+    );
+  }
   await Promise.all(tasks);
   return hits;
 }

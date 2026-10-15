@@ -1,6 +1,6 @@
 # ITDocs — IT Documentation Management System
 
-Self-hosted web app for documenting IT: assets and **where they have moved**, locations, people, and (in later phases) credentials, network, knowledge base, software & licences, vendors & contracts, changes & incidents. It is built for hospitals but works for any industry; medical-device features can be switched off.
+Self-hosted web app for documenting IT: assets and **where they have moved**, locations, people, credentials, network, and (in later phases) knowledge base, software & licences, vendors & contracts, changes & incidents. It is built for hospitals but works for any industry; medical-device features can be switched off.
 
 ## Status
 
@@ -9,7 +9,7 @@ Self-hosted web app for documenting IT: assets and **where they have moved**, lo
 | 1 | Foundation: AD/LDAP + break-glass login with MFA, roles, immutable audit log, search, settings | ✅ done |
 | 2 | Locations, assets, custom asset types/fields, **movement log**, check-out/in, QR labels + phone scanning, disposal with wipe records, medical-device fields, CSV import/export | ✅ done |
 | 3 | Password vault: AES-256-GCM, folder access control, audited reveal/copy, TOTP codes, password history, rotation reminders, links to assets | ✅ done |
-| 4 | Network: IPAM, VLANs, racks, switch ports, Wi-Fi | planned |
+| 4 | Network: IPAM with visual IP grid, VLANs, racks with U-layout, switch-port / patch-panel / wall-jack mapping, Wi-Fi linked to the vault | ✅ done |
 | 5 | Knowledge base / SOPs with versions & templates | planned |
 | 6 | Software & licences, vendors & contracts | planned |
 | 7 | Changes, incidents, daily journal | planned |
@@ -46,6 +46,16 @@ npm run vault:rotate                   # re-encrypts everything; safe to re-run
 ```
 
 **If you lose `VAULT_MASTER_KEY`, the stored secrets cannot be recovered.** Keep a copy offline, e.g. sealed with the break-glass password.
+
+## Network (phase 4)
+
+- **IPAM (IPv4).** Subnets are stored in CIDR form and normalised (`10.20.0.5/24` is rejected with a suggestion of `10.20.0.0/24`). Overlapping subnets are refused. Gateway, DHCP range and DNS are validated against the network. Subnets larger than a /16 are not supported.
+- **IP grid.** Each subnet page shows its addresses as a grid (in /24 blocks for larger subnets): free, assigned, reserved, DHCP reservation, DHCP pool, gateway. Click a square to record or edit that address. **Allocate next free** takes the lowest free address outside the gateway and DHCP pool. Two people allocating at the same moment can't get the same address, because a unique index decides and the loser retries.
+- **Rules.** An address must be a host address inside its subnet. It can't be the gateway (unless recorded as Reserved). It can't be a static assignment inside the DHCP pool; use *DHCP reservation* for those.
+- **VLANs** are per site, so the same VLAN ID can exist at two sites. **Racks** show a front elevation; click an empty unit to mount an asset or a labelled item such as a patch panel. Overlaps and over-height placements are refused. **Switch ports** record the connected device, patch-panel port, wall jack, access VLAN or trunk VLAN list, and status. You can create a whole range (`Gi1/0/1–48`) at once. Search by wall jack to trace a cable.
+- **Wi-Fi** networks record SSID, security, VLAN and site. The key or RADIUS secret stays in the vault: the network only links to the credential, and that link is shown only to people who can open its folder.
+- **Asset page.** It lists the asset's IP addresses, the switch port it's patched into, its rack position and, for switches, the documented ports.
+- Every change is audited; releasing an address or deleting a subnet keeps the old records in the audit entry.
 
 ## Production install (Docker, Linux)
 
