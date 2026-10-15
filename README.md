@@ -1,6 +1,6 @@
 # ITDocs — IT Documentation Management System
 
-Self-hosted web app for documenting IT: assets and **where they have moved**, locations, people, credentials, network, a knowledge base, software & licences, vendors & contracts, and (in later phases) changes & incidents. It is built for hospitals but works for any industry; medical-device features can be switched off.
+Self-hosted web app for documenting IT: assets and **where they have moved**, locations, people, credentials, network, a knowledge base, software & licences, vendors & contracts, changes & incidents, and a daily tech journal. It is built for hospitals but works for any industry; medical-device features can be switched off.
 
 ## Status
 
@@ -12,7 +12,7 @@ Self-hosted web app for documenting IT: assets and **where they have moved**, lo
 | 4 | Network: IPAM with visual IP grid, VLANs, racks with U-layout, switch-port / patch-panel / wall-jack mapping, Wi-Fi linked to the vault | ✅ done |
 | 5 | Knowledge base: Markdown SOPs and runbooks, full version history with diff and restore, templates, tags, categories, review reminders, attachments, links to assets and locations | ✅ done |
 | 6 | Software & licences (encrypted keys, seat assignment, over-allocation and reclaim warnings), vendors & contracts (support contacts, notice-period reminders, covered assets, documents), renewals view | ✅ done |
-| 7 | Changes, incidents, daily journal | planned |
+| 7 | Changes with approval workflow, risk and clash warnings; incidents with timelines, root cause and time-to-resolve; daily tech / on-call journal | ✅ done |
 | 8 | Diagrams, relationship map, reports, email/Teams alerts | planned |
 | 9 | REST API + tokens, AD/Intune/SCCM sync | planned |
 | 10 | Hardening: rate limits, CSP, e2e suite | planned |
@@ -75,6 +75,19 @@ npm run vault:rotate                   # re-encrypts everything; safe to re-run
 - **Software licences** are per user, per device, concurrent, or site (unlimited). **Licence keys are encrypted** with the vault master key: only technicians and admins can reveal them, every reveal is audited, and `npm run vault:rotate` re-encrypts them along with vault secrets.
 - **Seats** are assigned to a device or a person. Assigning past the seat count is allowed, because installs often come before paperwork, but the licence is flagged **over-allocated** on the licence, the software list ("compliance issues") and the dashboard. Seats held by retired, disposed or lost devices, or by people who have left, are highlighted as ones you can probably reclaim.
 - Asset pages show the contracts covering the device (with the vendor's support number) and its licences. Person pages show their licences.
+
+## Changes, incidents & journal (phase 7)
+
+- **Changes** (CHG numbers) record type, risk, window, impact, and implementation, rollback and test plans (in Markdown). They move through *Draft → Awaiting approval → Approved → In progress → Completed / Failed / Rolled back*, and every step is recorded with who did it and why.
+  - **Standard** changes are pre-approved routine work and can start straight from Draft.
+  - **Emergency** changes can start before approval. They're flagged until someone approves them afterwards.
+  - You can't approve your own change, and **high-risk changes need an administrator**.
+  - Editing a change that's awaiting approval sends it back to Draft, so nobody approves a plan that changed after review.
+  - Changes whose windows overlap are flagged, especially when they touch the same equipment.
+- **Incidents** (INC numbers, P1–P4) have an **append-only timeline**, enforced by the database: status changes, severity and owner changes, and updates all go on it. Marking an incident resolved requires a resolution, and closing a P1 or P2 requires a root cause. Time to mitigate and time to resolve are shown, and an incident can be linked to the change that caused it.
+- **Daily journal** is the shift and on-call log: short timestamped notes with tags, grouped by day, searchable, with on-call call-outs marked. Authors can correct their own entries for 24 hours; after that the record stands.
+- Changes and incidents can list affected assets, and the asset page shows them. The dashboard shows open incidents and the next 7 days of change windows.
+- Times you enter, like change windows and incident start times, are read in the **server's time zone**. Set `TZ` for the app container if it differs from local time.
 
 ## Production install (Docker, Linux)
 

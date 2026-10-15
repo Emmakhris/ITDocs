@@ -4,6 +4,9 @@ import { dashboardData } from "@/server/modules/dashboard";
 import { reviewDueCount } from "@/server/modules/kb";
 import { renewals } from "@/server/modules/vendors";
 import { overAllocated } from "@/server/modules/software";
+import { openIncidents } from "@/server/modules/incidents";
+import { upcomingChanges } from "@/server/modules/changes";
+import { changeNo, incidentNo } from "@/server/lib/workflow";
 import { can } from "@/server/rbac/permissions";
 import { Card, PageHeader, LinkButton, STATUS_META, fmtDate, fmtDateTime, Badge } from "@/components/ui";
 import type { AssetStatus } from "@prisma/client";
@@ -25,7 +28,7 @@ const daysFrom = (d: Date | null) => (d ? Math.round((d.getTime() - Date.now()) 
 
 export default async function Dashboard() {
   const ctx = await requireCtx();
-  const [d, kbDue, due, over] = await Promise.all([dashboardData(ctx), reviewDueCount(ctx), renewals(ctx, 60), overAllocated(ctx)]);
+  const [d, kbDue, due, over, incidents, changes] = await Promise.all([dashboardData(ctx), reviewDueCount(ctx), renewals(ctx, 60), overAllocated(ctx), openIncidents(ctx), upcomingChanges(ctx, 7)]);
   const writable = can(ctx.user.role, "assets", "write");
   const statuses = Object.keys(STATUS_META) as AssetStatus[];
   const max = Math.max(1, ...statuses.map((s) => d.byStatus[s] ?? 0));
@@ -53,6 +56,37 @@ export default async function Dashboard() {
         <Stat label="Overdue check-outs" value={d.overdue.length} href="/checkouts?overdue=1" tone="danger" />
         <Stat label="Lost" value={d.byStatus.LOST ?? 0} href="/assets?status=LOST" tone="danger" />
       </div>
+
+      {(incidents.length > 0 || changes.length > 0) && (
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          {incidents.length > 0 && (
+            <Card title={`Open incidents (${incidents.length})`} actions={<Link className="text-xs text-brand hover:underline" href="/changes/incidents">All incidents</Link>}>
+              <ul className="divide-y divide-line text-sm">
+                {incidents.slice(0, 8).map((i) => (
+                  <li key={i.id} className="flex items-center gap-2 py-1.5">
+                    <Badge tone={i.severity === "P1" || i.severity === "P2" ? "red" : "amber"}>{i.severity}</Badge>
+                    <Link href={`/changes/incidents/${i.id}`} className="min-w-0 flex-1 truncate hover:underline"><span className="font-mono text-xs">{incidentNo(i.number)}</span> {i.title}</Link>
+                    <span className="text-xs text-muted">{i.status.toLowerCase()}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+          {changes.length > 0 && (
+            <Card title="Changes in the next 7 days" actions={<Link className="text-xs text-brand hover:underline" href="/changes?view=upcoming">Schedule</Link>}>
+              <ul className="divide-y divide-line text-sm">
+                {changes.slice(0, 8).map((c) => (
+                  <li key={c.id} className="flex items-center gap-2 py-1.5">
+                    <Link href={`/changes/${c.id}`} className="min-w-0 flex-1 truncate hover:underline"><span className="font-mono text-xs">{changeNo(c.number)}</span> {c.title}</Link>
+                    <span className="whitespace-nowrap text-xs text-muted">{fmtDateTime(c.plannedStart)}</span>
+                    {c.status !== "APPROVED" && c.status !== "IN_PROGRESS" && <Badge tone="amber">not approved</Badge>}
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+        </div>
+      )}
 
       {kbDue > 0 && (
         <p className="mt-4 rounded-md border border-warn/30 bg-warn-soft px-3 py-2 text-sm text-warn">

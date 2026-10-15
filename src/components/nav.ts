@@ -30,7 +30,7 @@ export const NAV: NavGroup[] = [
       { href: "/kb", label: "Knowledge base", icon: "book-open", module: "kb" },
       { href: "/software", label: "Software & licences", icon: "app-window", module: "software" },
       { href: "/vendors", label: "Vendors & contracts", icon: "handshake", module: "vendors" },
-      { href: "/changes", label: "Changes & incidents", icon: "git-pull-request", module: "changes", phase: 7 },
+      { href: "/changes", label: "Changes & incidents", icon: "git-pull-request", module: "changes" },
       { href: "/diagrams", label: "Diagrams", icon: "share-2", module: "network", phase: 8 },
     ],
   },

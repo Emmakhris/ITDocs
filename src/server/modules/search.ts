@@ -3,6 +3,7 @@ import { db } from "../db";
 import { can } from "../rbac/permissions";
 import type { Ctx } from "../context";
 import { accessibleFolderIds } from "./vault";
+import { changeNo, incidentNo, parseRecordNo } from "../lib/workflow";
 
 export type SearchHit = { kind: string; id: string; title: string; subtitle?: string; href: string };
 
@@ -111,6 +112,27 @@ export async function globalSearch(ctx: Ctx, q: string, limit = 8): Promise<Sear
         .findMany({ where: { deletedAt: null, OR: [{ name: ci }, { poNumber: ci }] }, include: { software: { select: { name: true } } }, take: limit })
         .then((rows) => {
           for (const l of rows) hits.push({ kind: "Licence", id: l.id, title: `${l.software.name} — ${l.name}`, subtitle: l.poNumber ? `PO ${l.poNumber}` : undefined, href: `/software/licenses/${l.id}` });
+        }),
+    );
+  }
+  if (can(ctx.user.role, "changes", "read")) {
+    const no = parseRecordNo(term);
+    tasks.push(
+      db.changeRequest
+        .findMany({ where: { OR: [{ title: ci }, { ticketRef: ci }, ...(no?.kind === "change" ? [{ number: no.number }] : [])] }, select: { id: true, number: true, title: true, status: true }, orderBy: { number: "desc" }, take: limit })
+        .then((rows) => {
+          for (const c of rows) hits.push({ kind: "Change", id: c.id, title: `${changeNo(c.number)} · ${c.title}`, subtitle: c.status.toLowerCase().replace("_", " "), href: `/changes/${c.id}` });
+        }),
+      db.incident
+        .findMany({ where: { OR: [{ title: ci }, { ticketRef: ci }, ...(no?.kind === "incident" ? [{ number: no.number }] : [])] }, select: { id: true, number: true, title: true, status: true, severity: true }, orderBy: { number: "desc" }, take: limit })
+        .then((rows) => {
+          for (const i of rows) hits.push({ kind: "Incident", id: i.id, title: `${incidentNo(i.number)} · ${i.title}`, subtitle: `${i.severity} · ${i.status.toLowerCase()}`, href: `/changes/incidents/${i.id}` });
+        }),
+      db.journalEntry
+        .findMany({ where: { deletedAt: null, OR: [{ text: ci }, { tags: { has: term.toLowerCase() } }] }, select: { id: true, text: true, at: true, authorName: true }, orderBy: { at: "desc" }, take: limit })
+        .then((rows) => {
+          const day = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+          for (const e of rows) hits.push({ kind: "Journal", id: e.id, title: e.text.slice(0, 90), subtitle: `${e.authorName} · ${day(e.at)}`, href: `/changes/journal?day=${day(e.at)}#e-${e.id}` });
         }),
     );
   }

@@ -470,10 +470,76 @@ async function seedVendors() {
   console.log("Seeded vendors & software: 5 vendors, 5 contracts, 3 software titles, 3 licences.");
 }
 
+/** A few changes, incidents and journal entries — only when none exist yet. */
+async function seedChanges() {
+  if (await db.changeRequest.count()) return;
+  const H = 3600e3;
+  const at = (h: number) => new Date(Date.now() + h * H);
+  const admin = await db.user.findFirst({ where: { role: "ADMIN", active: true }, orderBy: { createdAt: "asc" } });
+  const by = { requesterId: admin?.id ?? null, requesterName: admin?.displayName ?? "seed" };
+  const switches = await db.asset.findMany({ where: { type: { name: "Network Switch" }, deletedAt: null }, select: { id: true }, take: 2 });
+  const hosts = await db.asset.findMany({ where: { type: { name: "Server" }, deletedAt: null }, select: { id: true }, take: 2 });
+  const affects = (fromType: string, fromId: string, ids: { id: string }[]) =>
+    db.entityLink.createMany({ data: ids.map((a) => ({ fromType, fromId, toType: "Asset", toId: a.id, kind: "affects" })), skipDuplicates: true });
+
+  const fw = await db.changeRequest.create({
+    data: {
+      ...by, title: "Upgrade MDF access switch firmware to 17.9.5", type: "NORMAL", risk: "MEDIUM", status: "SUBMITTED",
+      impact: "Wired network in Tower A floor 1 drops for ~10 minutes per switch",
+      description: "Vendor advisory: fixes a memory leak that caused the September outage.",
+      implementationPlan: `1. Back up running config
+2. Copy image to flash
+3. Reload one switch at a time
+4. Confirm uplinks and PoE`, rollbackPlan: "Boot from the previous image (kept on flash).", testPlan: `- [ ] Ping core
+- [ ] Phones register
+- [ ] WOW carts reconnect`,
+      plannedStart: at(50), plannedEnd: at(52), ticketRef: "CHG-REQ-1042",
+    },
+  });
+  await affects("Change", fw.id, switches);
+  const patch = await db.changeRequest.create({
+    data: { ...by, title: "Monthly Windows patching — hypervisor hosts", type: "STANDARD", risk: "LOW", status: "COMPLETED", implementationPlan: "Standard patching runbook (KB).", plannedStart: at(-30), plannedEnd: at(-27), actualStart: at(-30), actualEnd: at(-27.5), outcomeNote: "All hosts patched; no issues." },
+  });
+  await affects("Change", patch.id, hosts);
+  await db.changeRequest.create({
+    data: { ...by, title: "Replace UPS batteries in MDF", type: "NORMAL", risk: "HIGH", status: "DRAFT", impact: "Servers on single feed during the swap", implementationPlan: "Coordinate with Facilities; swap string A then B.", rollbackPlan: "Leave the old string connected until the new one is tested.", plannedStart: at(120), plannedEnd: at(123) },
+  });
+
+  const inc = await db.incident.create({
+    data: {
+      title: "EHR slow on all wards", severity: "P2", status: "MITIGATED", impact: "Charting takes 30–60 s per screen", startedAt: at(-5), detectedAt: at(-5), mitigatedAt: at(-3.5),
+      ownerId: admin?.id, causedByChangeId: patch.id, createdBy: admin?.displayName ?? "seed",
+      description: "Reported by ED and ICU at the same time. Database CPU at 100%.",
+    },
+  });
+  await affects("Incident", inc.id, hosts.slice(0, 1));
+  const name = admin?.displayName ?? "seed";
+  await db.incidentUpdate.createMany({
+    data: [
+      { incidentId: inc.id, at: at(-5), kind: "status", text: "Incident opened (P2)", authorName: name, authorId: admin?.id },
+      { incidentId: inc.id, at: at(-4.5), kind: "note", text: "DB host CPU pegged since last night's patching. Vendor case opened.", authorName: name, authorId: admin?.id },
+      { incidentId: inc.id, at: at(-3.5), kind: "status", text: "Status: investigating → mitigated — failed over to the secondary DB node", authorName: name, authorId: admin?.id },
+    ],
+  });
+  await db.incident.create({ data: { title: "Label printer offline in ED", severity: "P4", status: "RESOLVED", startedAt: at(-50), resolvedAt: at(-49), mitigatedAt: at(-49), resolution: "Cleared label jam (see KB article).", createdBy: name, ownerId: admin?.id } });
+
+  const day = (h: number, text: string, tags: string[], onCall = false) => ({ at: at(h), text, tags, onCall, authorName: name, authorId: admin?.id });
+  await db.journalEntry.createMany({
+    data: [
+      day(-26, "Patched hypervisor hosts per CHG. All green.", ["patching"]),
+      day(-22, "Called out 02:10 — UPS alarm in MDF. Battery string A failing self-test; raised change to replace.", ["ups", "mdf"], true),
+      day(-5, "EHR slowness reported by ED + ICU. Opened incident, failed over DB.", ["ehr", "incident"]),
+      day(-1, "Replaced toner in ED-PRN-02. Restocked label rolls in IT store.", ["printer"]),
+    ],
+  });
+  console.log("Seeded changes & incidents: 3 changes, 2 incidents, 4 journal entries.");
+}
+
 main()
   .then(seedNetwork)
   .then(seedKb)
   .then(seedVendors)
+  .then(seedChanges)
   .catch((e) => {
     console.error(e);
     process.exit(1);

@@ -1,5 +1,5 @@
 // ITDocs — IT Documentation Management System
-// Phase 1 (foundation) + Phase 2 (locations, assets, movement) + Phase 3 (vault) + Phase 4 (network) + Phase 5 (knowledge base) + Phase 6 (software, vendors)
+// Phase 1 (foundation) + Phase 2 (locations, assets, movement) + Phase 3 (vault) + Phase 4 (network) + Phase 5 (knowledge base) + Phase 6 (software, vendors) + Phase 7 (changes, incidents, journal)
 
 generator client {
   provider        = "prisma-client-js"
@@ -49,6 +49,11 @@ model User {
   vaultGrants      VaultFolderAccess[]
   articleVersions  ArticleVersion[]
   ownedArticles    Article[]  @relation("ArticleOwner")
+  changesRequested ChangeRequest[] @relation("ChangeRequester")
+  changesApproved  ChangeRequest[] @relation("ChangeApprover")
+  incidentsOwned   Incident[]      @relation("IncidentOwner")
+  incidentUpdates  IncidentUpdate[]
+  journalEntries   JournalEntry[]
 }
 
 model Session {
@@ -856,4 +861,149 @@ model LicenseAssignment {
   @@unique([licenseId, personId])
   @@index([assetId])
   @@index([personId])
+}
+
+// ───────────────────────────── Changes, incidents & journal (phase 7) ─────────────────────────────
+// Workflow rules live in src/server/lib/workflow.ts. Incident timelines are append-only (trigger).
+
+enum ChangeType {
+  STANDARD // pre-approved, low-risk routine change
+  NORMAL
+  EMERGENCY // may start before approval; must be approved afterwards
+}
+
+enum ChangeRisk {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum ChangeStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  ROLLED_BACK
+  CANCELLED
+}
+
+model ChangeRequest {
+  id                 String       @id @default(cuid())
+  number             Int          @unique @default(autoincrement())
+  title              String
+  description        String       @default("")
+  type               ChangeType   @default(NORMAL)
+  risk               ChangeRisk   @default(MEDIUM)
+  status             ChangeStatus @default(DRAFT)
+  impact             String? // who/what is affected, expected downtime
+  implementationPlan String       @default("")
+  rollbackPlan       String       @default("")
+  testPlan           String       @default("")
+  plannedStart       DateTime?
+  plannedEnd         DateTime?
+  actualStart        DateTime?
+  actualEnd          DateTime?
+  requesterId        String?
+  requester          User?        @relation("ChangeRequester", fields: [requesterId], references: [id])
+  requesterName      String
+  approverId         String?
+  approver           User?        @relation("ChangeApprover", fields: [approverId], references: [id])
+  approverName       String?
+  decidedAt          DateTime?
+  decisionNote       String?
+  outcomeNote        String?
+  ticketRef          String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  incidents Incident[]
+
+  @@index([status])
+  @@index([plannedStart])
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "ChangeRequest_title_trgm")
+}
+
+enum IncidentSeverity {
+  P1 // critical: patient care / whole site affected
+  P2
+  P3
+  P4
+}
+
+enum IncidentStatus {
+  OPEN
+  INVESTIGATING
+  MITIGATED
+  RESOLVED
+  CLOSED
+}
+
+model Incident {
+  id             String           @id @default(cuid())
+  number         Int              @unique @default(autoincrement())
+  title          String
+  description    String           @default("")
+  severity       IncidentSeverity @default(P3)
+  status         IncidentStatus   @default(OPEN)
+  impact         String?
+  startedAt      DateTime         @default(now())
+  detectedAt     DateTime         @default(now())
+  mitigatedAt    DateTime?
+  resolvedAt     DateTime?
+  closedAt       DateTime?
+  ownerId        String?
+  owner          User?            @relation("IncidentOwner", fields: [ownerId], references: [id])
+  causedByChangeId String?
+  causedByChange ChangeRequest?   @relation(fields: [causedByChangeId], references: [id], onDelete: SetNull)
+  rootCause      String?
+  resolution     String?
+  followUp       String? // lessons learned / actions
+  ticketRef      String?
+  createdBy      String
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  updates IncidentUpdate[]
+
+  @@index([status, severity])
+  @@index([startedAt])
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "Incident_title_trgm")
+}
+
+/// Timeline entry. Append-only: corrections are new entries.
+model IncidentUpdate {
+  id         String   @id @default(cuid())
+  incidentId String
+  incident   Incident @relation(fields: [incidentId], references: [id])
+  at         DateTime @default(now())
+  authorId   String?
+  author     User?    @relation(fields: [authorId], references: [id])
+  authorName String
+  kind       String   @default("note") // note, status, severity, owner
+  text       String
+
+  @@index([incidentId, at])
+}
+
+model JournalEntry {
+  id         String    @id @default(cuid())
+  at         DateTime  @default(now())
+  authorId   String?
+  author     User?     @relation(fields: [authorId], references: [id])
+  authorName String
+  text       String
+  tags       String[]
+  /// on-call call-outs are counted separately
+  onCall     Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+
+  @@index([at])
+  @@index([authorId, at])
+  @@index([tags], type: Gin)
+  @@index([text(ops: raw("gin_trgm_ops"))], type: Gin, map: "JournalEntry_text_trgm")
 }

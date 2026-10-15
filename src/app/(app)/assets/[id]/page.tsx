@@ -14,6 +14,8 @@ import { SeatsCard } from "@/components/seats-card";
 import { RenewalBadge } from "@/components/renewal-badge";
 import { seatsFor } from "@/server/modules/software";
 import { contractsForAsset } from "@/server/modules/vendors";
+import { recordsForAsset } from "@/server/modules/changes";
+import { changeNo, incidentNo } from "@/server/lib/workflow";
 import { NotFoundError } from "@/server/lib/errors";
 import { db } from "@/server/db";
 import { Badge, Card, DL, LinkButton, PageHeader, StatusBadge, fmtDate, fmtDateTime, Input, Button } from "@/components/ui";
@@ -41,7 +43,7 @@ export default async function AssetDetail({
     if (e instanceof NotFoundError) notFound();
     throw e;
   });
-  const [movements, history, locations, settings, credentials, network, articles, seats, contracts] = await Promise.all([
+  const [movements, history, locations, settings, credentials, network, articles, seats, contracts, records] = await Promise.all([
     assetMovements(ctx, a.id),
     entityHistory("Asset", a.id),
     locationTree(),
@@ -51,6 +53,7 @@ export default async function AssetDetail({
     articlesFor(ctx, "Asset", a.id),
     seatsFor(ctx, { assetId: a.id }),
     contractsForAsset(ctx, a.id),
+    recordsForAsset(ctx, a.id),
   ]);
   const atDate = sp.at ? new Date(sp.at) : null;
   const atResult = atDate && !Number.isNaN(atDate.getTime()) ? await assetAt(ctx, a.id, atDate) : null;
@@ -317,6 +320,27 @@ export default async function AssetDetail({
                       <RenewalBadge state={c.state} date={c.state === "expired" ? c.endDate : c.noticeBy} />
                     </div>
                     <p className="text-xs text-muted">{[c.vendor.name, c.vendor.supportPhone && `support ${c.vendor.supportPhone}`, c.sla].filter(Boolean).join(" · ")}</p>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+
+          {records.changes.length + records.incidents.length > 0 && (
+            <Card title="Changes & incidents">
+              <ul className="space-y-1 text-sm">
+                {records.incidents.map((i) => (
+                  <li key={i.id} className="flex flex-wrap items-center gap-2">
+                    <Badge tone={i.status === "RESOLVED" || i.status === "CLOSED" ? "gray" : "red"}>{i.severity}</Badge>
+                    <Link className="min-w-0 truncate text-brand hover:underline" href={`/changes/incidents/${i.id}`}><span className="font-mono text-xs">{incidentNo(i.number)}</span> {i.title}</Link>
+                    <span className="text-xs text-muted">{i.status.toLowerCase()} · {fmtDate(i.startedAt)}</span>
+                  </li>
+                ))}
+                {records.changes.map((c) => (
+                  <li key={c.id} className="flex flex-wrap items-center gap-2">
+                    <Badge>change</Badge>
+                    <Link className="min-w-0 truncate text-brand hover:underline" href={`/changes/${c.id}`}><span className="font-mono text-xs">{changeNo(c.number)}</span> {c.title}</Link>
+                    <span className="text-xs text-muted">{c.status.toLowerCase().replace("_", " ")}{c.plannedStart && ` · ${fmtDate(c.plannedStart)}`}</span>
                   </li>
                 ))}
               </ul>
