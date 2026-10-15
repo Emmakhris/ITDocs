@@ -4,6 +4,7 @@ const TABS = [
   { href: "/admin", label: "General" },
   { href: "/admin/types", label: "Asset types & fields" },
   { href: "/admin/users", label: "Users & directory" },
+  { href: "/admin/alerts", label: "Alerts" },
 ];
 
 export function AdminNav({ current }: { current: string }) {

@@ -10,6 +10,7 @@ import { Card, DL, LinkButton, PageHeader, StatusBadge, Table, Badge } from "@/c
 import { MovementTimeline } from "@/components/movement-timeline";
 import { DocumentationCard } from "@/components/kb-links";
 import { articlesFor } from "@/server/modules/kb";
+import { diagramsFor } from "@/server/modules/diagrams";
 import { LocationForm } from "../location-form";
 import { saveLocationAction, deleteLocationAction } from "../actions";
 import { DeleteLocation } from "./delete-location";
@@ -34,12 +35,13 @@ export default async function LocationDetail({ params, searchParams }: { params:
     );
   }
 
-  const [path, assets, movements, statusCounts, articles] = await Promise.all([
+  const [path, assets, movements, statusCounts, articles, diagrams] = await Promise.all([
     locationPath(db, id),
     listAssets(ctx, { locationId: id, pageSize: 25 }),
     recentMovements(ctx, { locationId: id, take: 15 }),
     db.asset.groupBy({ by: ["status"], where: { locationId: id, deletedAt: null }, _count: true }),
     articlesFor(ctx, "Location", id),
+    diagramsFor(ctx, { locationId: id }),
   ]);
 
   return (
@@ -100,6 +102,17 @@ export default async function LocationDetail({ params, searchParams }: { params:
             />
             {loc.notes && <p className="mt-3 whitespace-pre-wrap text-sm">{loc.notes}</p>}
           </Card>
+          {can(ctx.user.role, "network", "read") && (
+            <Card title="Diagrams" actions={<Link className="text-xs text-brand hover:underline" href={`/diagrams/map?type=Location&id=${id}`}>Relationship map</Link>}>
+              {diagrams.length ? (
+                <ul className="space-y-1 text-sm">
+                  {diagrams.map((d) => <li key={d.id}><Link className="text-brand hover:underline" href={`/diagrams/${d.id}`}>{d.title}</Link></li>)}
+                </ul>
+              ) : (
+                <p className="text-sm text-muted">No diagrams for this location.</p>
+              )}
+            </Card>
+          )}
           {can(ctx.user.role, "kb", "read") && <DocumentationCard articles={articles} canWrite={can(ctx.user.role, "kb", "write")} />}
           <Card title="Sub-locations">
             {loc.children.length ? (

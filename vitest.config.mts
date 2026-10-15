@@ -26,6 +26,10 @@ export default defineConfig({
       VAULT_OLD_MASTER_KEYS: "",
       // Attachment uploads from tests go to the OS temp folder, not ./data
       UPLOAD_DIR: path.join(os.tmpdir(), "itdocs-test-uploads"),
+      // Email goes to the delivery log only; Teams is off unless a test sets it
+      SMTP_HOST: "log",
+      TEAMS_WEBHOOK_URL: "",
+      APP_URL: "https://itdocs.test",
     },
   },
 });

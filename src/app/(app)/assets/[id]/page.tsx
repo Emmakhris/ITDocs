@@ -15,6 +15,7 @@ import { RenewalBadge } from "@/components/renewal-badge";
 import { seatsFor } from "@/server/modules/software";
 import { contractsForAsset } from "@/server/modules/vendors";
 import { recordsForAsset } from "@/server/modules/changes";
+import { diagramsFor } from "@/server/modules/diagrams";
 import { changeNo, incidentNo } from "@/server/lib/workflow";
 import { NotFoundError } from "@/server/lib/errors";
 import { db } from "@/server/db";
@@ -43,7 +44,7 @@ export default async function AssetDetail({
     if (e instanceof NotFoundError) notFound();
     throw e;
   });
-  const [movements, history, locations, settings, credentials, network, articles, seats, contracts, records] = await Promise.all([
+  const [movements, history, locations, settings, credentials, network, articles, seats, contracts, records, diagrams] = await Promise.all([
     assetMovements(ctx, a.id),
     entityHistory("Asset", a.id),
     locationTree(),
@@ -54,6 +55,7 @@ export default async function AssetDetail({
     seatsFor(ctx, { assetId: a.id }),
     contractsForAsset(ctx, a.id),
     recordsForAsset(ctx, a.id),
+    diagramsFor(ctx, { assetId: a.id }),
   ]);
   const atDate = sp.at ? new Date(sp.at) : null;
   const atResult = atDate && !Number.isNaN(atDate.getTime()) ? await assetAt(ctx, a.id, atDate) : null;
@@ -85,6 +87,7 @@ export default async function AssetDetail({
         }
         actions={
           <>
+            <LinkButton href={`/diagrams/map?type=Asset&id=${a.id}`}>Map</LinkButton>
             <LinkButton href={`/assets/labels?ids=${a.id}`}>Print label</LinkButton>
             {writable && !disposed && <LinkButton href={`/assets/${a.id}/edit`} variant="primary">Edit</LinkButton>}
           </>
@@ -348,6 +351,14 @@ export default async function AssetDetail({
           )}
 
           {can(ctx.user.role, "software", "read") && seats.length > 0 && <SeatsCard seats={seats} emptyText="" />}
+
+          {diagrams.length > 0 && (
+            <Card title="Diagrams">
+              <ul className="space-y-1 text-sm">
+                {diagrams.map((d) => <li key={d.id}><Link className="text-brand hover:underline" href={`/diagrams/${d.id}`}>{d.title}</Link></li>)}
+              </ul>
+            </Card>
+          )}
 
           {can(ctx.user.role, "kb", "read") && <DocumentationCard articles={articles} canWrite={can(ctx.user.role, "kb", "write")} />}
 

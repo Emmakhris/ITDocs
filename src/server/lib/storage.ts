@@ -8,7 +8,7 @@ import { AppError, FieldError } from "./errors";
 // /api/files/[id], which checks the reader may see the record the file belongs to.
 
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
-const AREAS = ["kb", "contracts"] as const;
+const AREAS = ["kb", "contracts", "diagrams"] as const;
 export type StorageArea = (typeof AREAS)[number];
 
 const uploadRoot = () => path.resolve(process.env.UPLOAD_DIR || "./data/uploads");

@@ -1,6 +1,6 @@
 # ITDocs — IT Documentation Management System
 
-Self-hosted web app for documenting IT: assets and **where they have moved**, locations, people, credentials, network, a knowledge base, software & licences, vendors & contracts, changes & incidents, and a daily tech journal. It is built for hospitals but works for any industry; medical-device features can be switched off.
+Self-hosted web app for documenting IT: assets and **where they have moved**, locations, people, credentials, network, a knowledge base, software & licences, vendors & contracts, changes & incidents, a daily tech journal, diagrams, reports and email/Teams alerts. It is built for hospitals but works for any industry; medical-device features can be switched off.
 
 ## Status
 
@@ -13,7 +13,7 @@ Self-hosted web app for documenting IT: assets and **where they have moved**, lo
 | 5 | Knowledge base: Markdown SOPs and runbooks, full version history with diff and restore, templates, tags, categories, review reminders, attachments, links to assets and locations | ✅ done |
 | 6 | Software & licences (encrypted keys, seat assignment, over-allocation and reclaim warnings), vendors & contracts (support contacts, notice-period reminders, covered assets, documents), renewals view | ✅ done |
 | 7 | Changes with approval workflow, risk and clash warnings; incidents with timelines, root cause and time-to-resolve; daily tech / on-call journal | ✅ done |
-| 8 | Diagrams, relationship map, reports, email/Teams alerts | planned |
+| 8 | Diagrams (versioned uploads, linked to locations and assets), relationship map, 13 built-in reports with CSV / Excel / print and scheduled email, email + Teams alerts (daily digest, P1/P2 incidents) | ✅ done |
 | 9 | REST API + tokens, AD/Intune/SCCM sync | planned |
 | 10 | Hardening: rate limits, CSP, e2e suite | planned |
 
@@ -88,6 +88,20 @@ npm run vault:rotate                   # re-encrypts everything; safe to re-run
 - **Daily journal** is the shift and on-call log: short timestamped notes with tags, grouped by day, searchable, with on-call call-outs marked. Authors can correct their own entries for 24 hours; after that the record stands.
 - Changes and incidents can list affected assets, and the asset page shows them. The dashboard shows open incidents and the next 7 days of change windows.
 - Times you enter, like change windows and incident start times, are read in the **server's time zone**. Set `TZ` for the app container if it differs from local time.
+
+## Diagrams, reports & alerts (phase 8)
+
+- **Diagrams.** Upload network drawings, floor plans, rack photos, PDFs, SVG, draw.io or Visio files (up to 10 MB). The file type is detected from the file's content, not its name. Images and SVG show in the page; other types download. Uploading again keeps earlier versions. Diagrams link to a location and to the assets they show, and appear on those pages.
+- **Relationship map** (Diagrams › Relationship map, or **Map** on an asset): shows everything connected to a record across modules — location, assignee, IPs and subnets, switch port, rack, licences, contracts, changes, incidents, articles, diagrams and vault credentials. Click any node to re-centre on it. You only see records your role can open, and credentials only from vault folders you can open.
+- **Reports** (13 built in): inventory, assets by location, warranties ending, movements by period, PHI devices, preventive maintenance due, licence compliance, renewals, incidents (with mean time to resolve), changes (with success rate), knowledge-base reviews, password rotation due, and a user access review.
+  - Each report checks the permission of the module it reads from, so Read-only users don't see vault reports and only admins and auditors see the access review.
+  - Export to **CSV** or **Excel**. The `.xlsx` is written by the app itself: text cells are never treated as formulas, and dates are real Excel dates. Use **Print / PDF** for a PDF.
+  - Every export is audited. Technicians and admins can **email a report on a schedule** (daily, weekly or monthly, as Excel or CSV).
+- **Alerts** (Admin › Alerts):
+  - A **daily digest**, sent by email and/or Teams after the configured hour, lists open incidents, changes awaiting approval, today's change windows, overdue check-outs, contract notice deadlines, over-allocated licences, warranties, maintenance and reviews due. Vault items are counted, never named. Days with nothing to report are skipped.
+  - **P1/P2 incidents** alert immediately when opened or escalated.
+  - Every attempt is recorded in a delivery log. The same alert never goes out twice, even if several app instances run the scheduler.
+  - Set up `SMTP_*` and `TEAMS_WEBHOOK_URL` in `.env` (see `.env.example`), then use **Send test** on the Alerts page. The scheduler runs inside the app every 5 minutes; set `TZ` so the digest hour matches local time.
 
 ## Production install (Docker, Linux)
 

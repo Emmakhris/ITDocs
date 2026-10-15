@@ -1,5 +1,5 @@
 // ITDocs — IT Documentation Management System
-// Phase 1 (foundation) + Phase 2 (locations, assets, movement) + Phase 3 (vault) + Phase 4 (network) + Phase 5 (knowledge base) + Phase 6 (software, vendors) + Phase 7 (changes, incidents, journal)
+// Phase 1 (foundation) + Phase 2 (locations, assets, movement) + Phase 3 (vault) + Phase 4 (network) + Phase 5 (knowledge base) + Phase 6 (software, vendors) + Phase 7 (changes, incidents, journal) + Phase 8 (diagrams, reports, alerts)
 
 generator client {
   provider        = "prisma-client-js"
@@ -175,6 +175,7 @@ model Location {
   subnets       Subnet[]
   racks         Rack[]
   wifiNetworks  WifiNetwork[]
+  diagrams      Diagram[]
 
   @@index([parentId])
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Location_name_trgm")
@@ -1006,4 +1007,86 @@ model JournalEntry {
   @@index([authorId, at])
   @@index([tags], type: Gin)
   @@index([text(ops: raw("gin_trgm_ops"))], type: Gin, map: "JournalEntry_text_trgm")
+}
+
+// ───────────────────────────── Diagrams, reports & alerts (phase 8) ─────────────────────────────
+
+enum DiagramKind {
+  NETWORK
+  FLOOR_PLAN
+  RACK
+  PROCESS
+  OTHER
+}
+
+/// Metadata for an uploaded diagram. The file itself is an Attachment (entityType "Diagram");
+/// re-uploading keeps earlier files, and the newest one is shown.
+model Diagram {
+  id          String      @id @default(cuid())
+  title       String
+  description String?
+  kind        DiagramKind @default(NETWORK)
+  locationId  String?
+  location    Location?   @relation(fields: [locationId], references: [id])
+  createdBy   String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  deletedAt   DateTime?
+
+  @@index([locationId])
+}
+
+enum ReportFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum ReportFormat {
+  CSV
+  XLSX
+}
+
+/// A built-in report emailed on a schedule (reports are defined in src/server/modules/reports.ts).
+model ReportSubscription {
+  id         String          @id @default(cuid())
+  reportKey  String
+  params     Json            @default("{}")
+  frequency  ReportFrequency @default(WEEKLY)
+  format     ReportFormat    @default(XLSX)
+  recipients String[]
+  active     Boolean         @default(true)
+  createdBy  String
+  createdAt  DateTime        @default(now())
+  lastSentAt DateTime?
+  nextRunAt  DateTime
+
+  @@index([active, nextRunAt])
+}
+
+enum AlertChannel {
+  EMAIL
+  TEAMS
+}
+
+enum DeliveryStatus {
+  SENT
+  FAILED
+  SKIPPED
+}
+
+/// Every email / Teams message the app tried to send. dedupeKey stops the same alert going twice.
+model AlertDelivery {
+  id         String         @id @default(cuid())
+  at         DateTime       @default(now())
+  channel    AlertChannel
+  kind       String // digest, incident, report, test
+  subject    String
+  recipients String?
+  status     DeliveryStatus
+  error      String?
+  dedupeKey  String?
+
+  @@unique([channel, dedupeKey])
+  @@index([at])
 }

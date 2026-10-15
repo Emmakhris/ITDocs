@@ -31,13 +31,13 @@ export const NAV: NavGroup[] = [
       { href: "/software", label: "Software & licences", icon: "app-window", module: "software" },
       { href: "/vendors", label: "Vendors & contracts", icon: "handshake", module: "vendors" },
       { href: "/changes", label: "Changes & incidents", icon: "git-pull-request", module: "changes" },
-      { href: "/diagrams", label: "Diagrams", icon: "share-2", module: "network", phase: 8 },
+      { href: "/diagrams", label: "Diagrams", icon: "share-2", module: "network" },
     ],
   },
   {
     label: "Governance",
     items: [
-      { href: "/reports", label: "Reports", icon: "bar-chart-3", module: "reports", phase: 8 },
+      { href: "/reports", label: "Reports", icon: "bar-chart-3", module: "reports" },
       { href: "/audit", label: "Audit log", icon: "shield-check", module: "audit" },
       { href: "/admin", label: "Administration", icon: "settings", module: "admin" },
     ],

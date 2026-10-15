@@ -10,6 +10,13 @@ export type AppSettings = {
   medicalModule: boolean;
   assetTagPrefix: string;
   labelSubtitle: string;
+  /** Comma-separated addresses for the daily digest and incident alerts */
+  alertRecipients: string;
+  digestEnabled: boolean;
+  /** Local hour (0–23) after which the daily digest is sent */
+  digestHour: number;
+  /** Send P1/P2 incidents to email + Teams as soon as they're opened or escalated */
+  incidentAlerts: boolean;
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -17,6 +24,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   medicalModule: true,
   assetTagPrefix: "IT-",
   labelSubtitle: "Property of IT — call x1234",
+  alertRecipients: "",
+  digestEnabled: false,
+  digestHour: 7,
+  incidentAlerts: true,
 };
 
 export const getSettings = cache(async (): Promise<AppSettings> => {

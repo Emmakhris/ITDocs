@@ -7,6 +7,7 @@ import { assertCan, can } from "../rbac/permissions";
 import { AppError, FieldError, NotFoundError } from "../lib/errors";
 import { optDate, optStr } from "../lib/forms";
 import { incidentNo, incidentOpen, incidentStatusChange } from "../lib/workflow";
+import { notifyIncident } from "./alerts";
 import type { Ctx } from "../context";
 
 // Incident records with an append-only timeline, severity, owner, root cause and resolution,
@@ -88,7 +89,7 @@ export async function createIncident(ctx: Ctx, input: unknown) {
   const d = incidentInput.parse(input);
   await checkRefs(d);
   if (d.startedAt && d.startedAt.getTime() > Date.now() + 5 * 60_000) throw new FieldError({ startedAt: "Can't start in the future" });
-  return db.$transaction(async (tx) => {
+  const created = await db.$transaction(async (tx) => {
     const i = await tx.incident.create({
       data: {
         title: d.title,
@@ -106,13 +107,17 @@ export async function createIncident(ctx: Ctx, input: unknown) {
     await audit(tx, ctx, { action: "create", entityType: "Incident", entityId: i.id, summary: `Opened ${incidentNo(i.number)} "${i.title}" (${i.severity})` });
     return i;
   });
+  // After commit, so a slow mail server never holds up or rolls back the incident
+  await notifyIncident(created.id, "opened");
+  return created;
 }
 
 export async function updateIncident(ctx: Ctx, id: string, input: unknown) {
   assertCan(ctx.user.role, "changes", "write");
   const d = incidentInput.parse(input);
   await checkRefs(d);
-  return db.$transaction(async (tx) => {
+  let escalated = false;
+  const updated = await db.$transaction(async (tx) => {
     const before = await tx.incident.findUnique({ where: { id }, include: { owner: { select: { displayName: true } } } });
     if (!before) throw new NotFoundError("Incident");
     const after = await tx.incident.update({
@@ -133,7 +138,11 @@ export async function updateIncident(ctx: Ctx, id: string, input: unknown) {
       include: { owner: { select: { displayName: true } } },
     });
     // Severity and owner changes belong on the timeline, not just the audit log
-    if (before.severity !== after.severity) await note(tx, ctx, id, "severity", `Severity changed ${before.severity} → ${after.severity}`);
+    if (before.severity !== after.severity) {
+      await note(tx, ctx, id, "severity", `Severity changed ${before.severity} → ${after.severity}`);
+      // P4 → P1 is "higher": enum order is P1 < P2 < P3 < P4
+      escalated = after.severity < before.severity && (after.severity === "P1" || after.severity === "P2");
+    }
     if (before.ownerId !== after.ownerId) await note(tx, ctx, id, "owner", `Owner changed to ${after.owner?.displayName ?? "nobody"}`);
     const { owner: _o, ...b } = before;
     const { owner: _a, ...a } = after;
@@ -141,6 +150,8 @@ export async function updateIncident(ctx: Ctx, id: string, input: unknown) {
     if (df.changed.length) await audit(tx, ctx, { action: "update", entityType: "Incident", entityId: id, summary: `Updated ${incidentNo(after.number)} (${df.changed.join(", ")})`, before: df.before, after: df.after });
     return after;
   });
+  if (escalated) await notifyIncident(id, "escalated");
+  return updated;
 }
 
 export async function addIncidentUpdate(ctx: Ctx, id: string, text: string) {
