@@ -66,14 +66,6 @@ export function parseCidr(s: string): Cidr {
   return build(network, prefix);
 }
 
-export function tryParseCidr(s: string): Cidr | null {
-  try {
-    return parseCidr(s);
-  } catch {
-    return null;
-  }
-}
-
 /** Is the address inside the subnet (network and broadcast included)? */
 export function inSubnet(ip: string | number, subnet: Cidr | string): boolean {
   const n = typeof ip === "number" ? ip : parseIp(ip);

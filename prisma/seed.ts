@@ -1,4 +1,13 @@
-/* Seed: break-glass admin, AD group mappings, asset types, and (if empty) demo data incl. network. Safe to re-run. */
+/*
+ * Seed. Safe to re-run: every block only adds what's missing.
+ *   Always:      break-glass admin (BOOTSTRAP_ADMIN_*), AD group → role mappings, asset types,
+ *                knowledge-base categories and templates.
+ *   With --demo: a fictional hospital — locations, people, assets, network, articles, vendors,
+ *                licences, changes, incidents, journal and a diagram. Never use --demo in production.
+ *
+ *   npx tsx prisma/seed.ts            # production / first run
+ *   npm run db:seed                   # development (adds --demo)
+ */
 import { PrismaClient, type LocationType, type AssetStatus } from "@prisma/client";
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
@@ -6,6 +15,7 @@ import { aad, encrypt, vaultConfigured } from "../src/server/crypto/vault";
 import { storeFile } from "../src/server/lib/storage";
 
 const db = new PrismaClient();
+const DEMO = process.argv.includes("--demo") || process.env.SEED_DEMO === "true";
 
 async function main() {
   // ── Break-glass admin ──
@@ -73,6 +83,10 @@ async function main() {
     await db.assetType.upsert({ where: { name: t.name }, create: t, update: {} });
   }
 
+  if (!DEMO) {
+    console.log("Base data ready. (Run with --demo for the demo hospital.)");
+    return;
+  }
   if (await db.location.count()) {
     console.log("Locations exist — skipping demo data.");
     return;
@@ -196,6 +210,7 @@ async function pathOf(id: string) {
 
 /** Demo VLANs, subnets, a rack, switch ports and Wi-Fi — only when no network data exists yet. */
 async function seedNetwork() {
+  if (!DEMO) return;
   if (await db.vlan.count()) return;
   const main = await db.location.findUnique({ where: { code: "MAIN" } });
   const west = await db.location.findUnique({ where: { code: "WEST" } });
@@ -268,11 +283,12 @@ async function seedNetwork() {
 
 /** KB categories, the standard templates and a few demo articles — only when the KB is empty. */
 async function seedKb() {
-  if (await db.article.count()) return;
+  // Categories and templates are useful in production too; the sample articles are demo only
+  if (await db.article.count({ where: { isTemplate: true } })) return seedKbDemo();
   const cat = async (name: string, description: string) => db.kbCategory.upsert({ where: { name }, create: { name, description }, update: {} });
-  const clinical = await cat("Clinical systems", "EHR, PACS, lab and medical-device procedures");
-  const infra = await cat("Infrastructure", "Servers, network, storage, backups");
-  const desk = await cat("Service desk", "How-tos for common tickets");
+  await cat("Clinical systems", "EHR, PACS, lab and medical-device procedures");
+  await cat("Infrastructure", "Servers, network, storage, backups");
+  await cat("Service desk", "How-tos for common tickets");
   await cat("Security", "Access, incidents, compliance");
 
   const DAY = 86_400_000;
@@ -358,6 +374,29 @@ When to declare downtime.
 1. Back-entry of paper records
 2. Confirm interfaces are flowing`, { isTemplate: true, tags: ["downtime"] });
 
+  console.log("Seeded knowledge base: 4 categories, 4 templates.");
+  return seedKbDemo();
+}
+
+async function seedKbDemo() {
+  if (!DEMO || (await db.article.count({ where: { isTemplate: false } }))) return;
+  const DAY = 86_400_000;
+  const clinical = await db.kbCategory.findUniqueOrThrow({ where: { name: "Clinical systems" } });
+  const infra = await db.kbCategory.findUniqueOrThrow({ where: { name: "Infrastructure" } });
+  const desk = await db.kbCategory.findUniqueOrThrow({ where: { name: "Service desk" } });
+  const article = async (title: string, body: string, o: { categoryId?: string; tags?: string[]; status?: "DRAFT" | "PUBLISHED"; reviewEveryDays?: number; links?: { toType: string; toId: string }[] } = {}) => {
+    const a = await db.article.create({
+      data: {
+        title, body, categoryId: o.categoryId, tags: o.tags ?? [], status: o.status ?? "PUBLISHED",
+        reviewEveryDays: o.reviewEveryDays, reviewDueAt: o.reviewEveryDays ? new Date(Date.now() + o.reviewEveryDays * DAY) : null,
+        createdBy: "seed", updatedBy: "seed",
+      },
+    });
+    await db.articleVersion.create({ data: { articleId: a.id, version: 1, title, body, changeNote: "Created", editedByName: "seed" } });
+    for (const l of o.links ?? []) await db.entityLink.create({ data: { fromType: "Article", fromId: a.id, toType: l.toType, toId: l.toId, kind: "documents" } });
+    return a;
+  };
+
   // ── Demo articles ──
   const ed = await db.location.findUnique({ where: { code: "ED" } });
   const mdf = await db.location.findUnique({ where: { code: "MDF" } });
@@ -411,11 +450,12 @@ Labels feed crooked, or the status light flashes **red**.
 1. Join SSID **HOSP-Biomed** (key in the vault: *Biomed Wi-Fi PSK*).
 2. Record the MAC address in the asset record.`, { categoryId: clinical.id, tags: ["biomed", "wifi"], status: "DRAFT" });
 
-  console.log("Seeded knowledge base: 4 categories, 4 templates, 4 articles.");
+  console.log("Seeded 4 demo knowledge-base articles.");
 }
 
 /** Vendors, contracts, software and licences — only when no vendors exist yet. */
 async function seedVendors() {
+  if (!DEMO) return;
   if (await db.vendor.count()) return;
   const DAY = 86_400_000;
   const at = (days: number) => new Date(Date.now() + days * DAY);
@@ -473,6 +513,7 @@ async function seedVendors() {
 
 /** A few changes, incidents and journal entries — only when none exist yet. */
 async function seedChanges() {
+  if (!DEMO) return;
   if (await db.changeRequest.count()) return;
   const H = 3600e3;
   const at = (h: number) => new Date(Date.now() + h * H);
@@ -538,6 +579,7 @@ async function seedChanges() {
 
 /** A generated network diagram for the MDF, linked to its switches and servers. */
 async function seedDiagrams() {
+  if (!DEMO) return;
   if (await db.diagram.count()) return;
   const mdf = await db.location.findUnique({ where: { code: "MDF" } });
   if (!mdf) return;

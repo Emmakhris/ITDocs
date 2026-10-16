@@ -1,9 +1,9 @@
 import type { Module } from "@/server/rbac/permissions";
 
-export type NavItem = { href: string; label: string; icon: string; module: Module; phase?: number };
+export type NavItem = { href: string; label: string; icon: string; module: Module };
 export type NavGroup = { label: string; items: NavItem[] };
 
-/** Sidebar structure. Items with `phase` are on the roadmap and show a "planned" page. */
+/** Sidebar structure. Items are shown to users whose role can read the item's module. */
 export const NAV: NavGroup[] = [
   {
     label: "Overview",

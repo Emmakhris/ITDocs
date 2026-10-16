@@ -14,4 +14,4 @@ if (!name.endsWith("_e2e")) {
 }
 const env = { ...process.env, NODE_ENV: "development" as const };
 execSync("npx prisma migrate deploy", { stdio: "inherit", env });
-execSync("npx tsx prisma/seed.ts", { stdio: "inherit", env });
+execSync("npx tsx prisma/seed.ts --demo", { stdio: "inherit", env });

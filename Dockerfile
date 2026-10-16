@@ -7,7 +7,8 @@ FROM node:22-alpine AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npx prisma generate && npm run build
+# public/ may be empty (and so absent from git); make sure it exists for the COPY below
+RUN mkdir -p public && npx prisma generate && npm run build
 
 FROM node:22-alpine AS run
 WORKDIR /app
@@ -19,8 +20,9 @@ COPY --from=build /app/.next ./.next
 COPY --from=build /app/public ./public
 COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/scripts ./scripts
-# vault crypto module is needed by scripts/vault-rotate-key.ts
+# Needed at runtime by prisma/seed.ts and scripts/vault-rotate-key.ts (run with tsx in the container)
 COPY --from=build /app/src/server/crypto ./src/server/crypto
+COPY --from=build /app/src/server/lib ./src/server/lib
 USER app
 EXPOSE 3000
 # Apply pending migrations, then start

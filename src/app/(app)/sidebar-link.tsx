@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { Menu, X } from "lucide-react";
 import { cx } from "@/components/ui";
 
-export function SidebarLink({ href, planned, children }: { href: string; planned?: boolean; children: React.ReactNode }) {
+export function SidebarLink({ href, children }: { href: string; children: React.ReactNode }) {
   const path = usePathname();
   const active = path === href || path.startsWith(href + "/");
   return (
@@ -16,7 +16,6 @@ export function SidebarLink({ href, planned, children }: { href: string; planned
       className={cx(
         "flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors",
         active ? "bg-sidebar-active text-white" : "text-sidebar-fg hover:bg-sidebar-active/60 hover:text-white",
-        planned && !active && "opacity-60",
       )}
     >
       {children}

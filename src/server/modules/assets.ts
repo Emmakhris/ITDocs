@@ -389,14 +389,6 @@ export async function checkinAsset(ctx: Ctx, assetId: string, raw: unknown, meth
   });
 }
 
-export async function overdueCheckouts() {
-  return db.checkout.findMany({
-    where: { returnedAt: null, dueAt: { lt: new Date() } },
-    include: { asset: true, person: true },
-    orderBy: { dueAt: "asc" },
-  });
-}
-
 // ───────────────────────────── Lifecycle: disposal ─────────────────────────────
 
 export const disposalInput = z.object({

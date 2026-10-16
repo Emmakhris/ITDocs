@@ -2,7 +2,7 @@
 
 Self-hosted web app for documenting IT: assets and **where they have moved**, locations, people, credentials, network, a knowledge base, software & licences, vendors & contracts, changes & incidents, a daily tech journal, diagrams, reports, email/Teams alerts, a REST API and AD/Intune/SCCM sync. It is built for hospitals but works for any industry; medical-device features can be switched off.
 
-## Status
+## Features by phase
 
 | Phase | Scope | State |
 |---|---|---|
@@ -112,7 +112,8 @@ npm run vault:rotate                   # re-encrypts everything; safe to re-run
 
   ```bash
   curl -H "Authorization: Bearer itd_…" "https://itdocs.example.local/api/v1/assets?q=latitude&pageSize=20"
-  curl -X POST -H "Authorization: Bearer itd_…" -H "Content-Type: application/json"        -d '{"title":"Core switch down","severity":"P1"}' https://itdocs.example.local/api/v1/incidents
+  curl -X POST -H "Authorization: Bearer itd_…" -H "Content-Type: application/json" \
+       -d '{"title":"Core switch down","severity":"P1"}' https://itdocs.example.local/api/v1/incidents
   ```
 - **Sync** (Admin › Integrations & API). Every source has **Preview (dry run)**, and every run is logged with the full list of changes.
   - **Active Directory → people.** Creates and updates people. People already entered by hand are matched on employee ID or email. Disabled or removed accounts are deactivated, never deleted, and a run that would deactivate more than 20% of directory people stops unless you tick the override.
@@ -152,8 +153,21 @@ npm run vault:rotate                   # re-encrypts everything; safe to re-run
 git clone <repo> itdocs && cd itdocs
 cp .env.example .env          # then edit: POSTGRES_PASSWORD, APP_URL, LDAP_*, BOOTSTRAP_ADMIN_*, VAULT_MASTER_KEY
 docker compose up -d --build
-docker compose exec app npx tsx prisma/seed.ts   # first run only: break-glass admin, default AD group mappings, asset types
+docker compose exec app npx tsx prisma/seed.ts   # first run: break-glass admin, AD group mappings, asset types, KB templates
 ```
+
+The seed is safe to run again; it only adds what's missing. It never creates demo data unless you pass `--demo`, which is meant for development and evaluation only.
+
+### Updating
+
+```bash
+git pull
+docker compose up -d --build                     # the app applies new database migrations on start
+docker compose exec app npx tsx prisma/seed.ts   # optional: adds any new default templates or settings
+docker compose ps                                # wait for the app to show "healthy" (/api/health)
+```
+
+Take a backup first (see *Backups*). Migrations only move forward and are applied automatically by `prisma migrate deploy` at start-up. Check the README for new `.env` settings after each update; `.env.example` lists them all.
 
 The app listens on `127.0.0.1:3000`. Put TLS in front of it with the example in `docker/Caddyfile` (uncomment the `caddy` service) or your existing reverse proxy. Phone camera scanning **requires HTTPS**.
 
@@ -188,7 +202,7 @@ Back up the `uploads` volume and your `.env` separately. Keep `VAULT_MASTER_KEY`
 npm install
 npm run db:dev            # embedded PostgreSQL on :5433 — leave running
 npx prisma migrate deploy
-npm run db:seed           # demo hospital data + break-glass admin from .env
+npm run db:seed           # base data + the demo hospital (--demo) + break-glass admin from .env
 npm run dev               # http://localhost:3000
 ```
 
@@ -216,4 +230,6 @@ npm run test:e2e                  # report in playwright-report/
 - `src/server/modules/assets.ts › recordMovement()` is the single function that writes movement history.
 - `src/server/crypto/vault.ts` is the only code that touches vault keys; `src/server/modules/vault.ts › reveal()` is the only path that returns a decrypted secret.
 - Sessions are random tokens stored hashed in the DB, with an idle timeout (`SESSION_IDLE_MINUTES`) and a maximum lifetime. Disabling a user kills their sessions.
-- Security headers are set in `next.config.ts`. CSV exports are protected against formula injection, and LDAP filter input is escaped.
+- Security: the Content Security Policy (per-request nonce) and the session gate are in `src/middleware.ts`; other headers are in `next.config.ts`; rate limits in `src/server/lib/rate-limit.ts`. CSV and Excel exports are protected against formula injection, and LDAP filter input is escaped.
+- Background jobs (alert digest, scheduled reports, syncs, rate-limit cleanup) run in-process from `src/instrumentation.ts` → `src/server/scheduler.ts`.
+- **Contributing:** see [`CLAUDE.md`](CLAUDE.md) for the code layout, the rules every change must follow (RBAC + audit in one transaction, append-only tables, the movement log), conventions, known pitfalls, and how to test and verify.

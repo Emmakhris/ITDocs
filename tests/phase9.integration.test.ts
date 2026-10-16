@@ -121,7 +121,7 @@ describe("REST API v1", () => {
     expect((await call(reportRoute.GET, rw, "/reports/vault-rotation", { params: { key: "vault-rotation" } })).status).toBe(403);
     const inv = await call(reportRoute.GET, ro, "/reports/inventory", { params: { key: "inventory" } });
     expect((await inv.json()).columns[0]).toBe("Tag");
-  });
+  }, 30_000); // the inventory report reads every asset, and the test DB may hold the 50k-asset perf seed
 
   it("publishes an OpenAPI description", async () => {
     const spec = await (await openapi()).json();

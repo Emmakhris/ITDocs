@@ -28,7 +28,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <ul className="space-y-0.5">
             {g.items.map((i) => (
               <li key={i.href}>
-                <SidebarLink href={i.href} planned={!!i.phase}>
+                <SidebarLink href={i.href}>
                   <Icon name={i.icon} />
                   <span className="flex-1">{i.label}</span>
                 </SidebarLink>

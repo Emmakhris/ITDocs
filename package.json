@@ -10,7 +10,7 @@
     "db:dev": "node scripts/dev-db.mjs",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:seed": "tsx --env-file=.env prisma/seed.ts",
+    "db:seed": "tsx --env-file=.env prisma/seed.ts --demo",
     "db:seed-large": "tsx --env-file=.env prisma/seed-large.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
